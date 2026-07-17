@@ -1,0 +1,58 @@
+services:
+  organova-app:
+    image: ${APP_IMAGE:?APP_IMAGE is required}
+    # 用 on-failure 而非 unless-stopped：配置错误（DB 密码错、env 缺项、迁移失败）时
+    # 容器会瞬崩，unless-stopped 会无限重启把磁盘日志和镜像层吃满。重试 5 次就停，
+    # 留时间排查；正常运行时崩溃同样会自愈，只是不会无限拉。
+    restart: on-failure:5
+    expose:
+      - "3000"
+    env_file:
+      - path: .env
+        required: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - uploads_data:/app/public/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  organova-nginx:
+    image: ${NGINX_IMAGE:?NGINX_IMAGE is required}
+    restart: unless-stopped
+    # 默认仅 HTTP（适合阿里云 ECS 等无 SSL 场景）
+    # 需要 HTTPS（如 AWS EC2 + Let's Encrypt）请额外叠加 docker-compose.https.yml：
+    #   docker compose -f docker-compose.yml -f docker-compose.https.yml up
+    # manage.sh 会自动检测并叠加该 override 文件
+    ports:
+      - "${HOST_PORT:-80}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - uploads_data:/usr/share/nginx/uploads:ro
+    depends_on:
+      organova-app:
+        condition: service_healthy
+
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    profiles:
+      - dev
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: organova
+    # PG18+ 要求挂在 /var/lib/postgresql（让镜像自己在子目录建版本化目录），
+    # 不再支持直接挂 /var/lib/postgresql/data。详见 docker-library/postgres#1259
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+volumes:
+  postgres_data:
+  uploads_data:

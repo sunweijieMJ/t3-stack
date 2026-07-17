@@ -1,0 +1,54 @@
+/* header 不再占用文档流（无 spacer），以 fixed 覆盖在 main（首屏 hero）之上，
+ * 并在向下滚动时始终固定在视口顶部
+ */
+.header {
+  display: flex;
+  position: fixed;
+  z-index: 100;
+  top: 0;
+  left: 0;
+  right: 0;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+  padding: 0 48px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.4);
+  background: rgb(0 0 0 / 0.8);
+}
+
+.logo {
+  color: rgb(255 255 255 / 0.8);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.menu {
+  display: flex;
+  align-items: center;
+  gap: 48px;
+}
+
+.link {
+  color: rgb(255 255 255 / 0.8);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1;
+
+  &:hover {
+    color: rgb(255 255 255 / 1);
+  }
+}
+
+.authBtn {
+  border: none;
+  background: none;
+  color: rgb(255 255 255 / 0.8);
+  font-size: 16px;
+  font-weight: 400;
+  cursor: pointer;
+
+  &:hover {
+    color: rgb(255 255 255 / 1);
+  }
+}

@@ -1,0 +1,14 @@
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding: 80px 24px;
+}
+
+.text {
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--portal-primary, #ff6b3d);
+}

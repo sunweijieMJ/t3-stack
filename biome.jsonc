@@ -1,0 +1,90 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "root": true,
+  "vcs": {
+    "enabled": true,
+    "useIgnoreFile": true,
+    "clientKind": "git"
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "recommended": true,
+      "source": {
+        "recommended": true,
+        "organizeImports": "on",
+        "useSortedAttributes": "on"
+      }
+    }
+  },
+  "files": {
+    "includes": ["**", "!drizzle"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "lineEnding": "lf"
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "suspicious": {
+        // 数组索引作为 key 在只读列表中可接受
+        "noArrayIndexKey": "off",
+        // 泛型配置工具类（ConfigEditor、frontend-config）中 any 是合理的
+        "noExplicitAny": "off"
+      },
+      "security": {
+        // CMS 富文本渲染使用 dangerouslySetInnerHTML，项目内统一如此；
+        // 内容来自受信任的后台，不做全局关闭但降为警告提醒
+        "noDangerouslySetInnerHtml": "warn"
+      },
+      "performance": {
+        // 项目未配置 next/image 远程域名，大量静态 SVG/图标也无需优化
+        // 后续统一迁移 next/image 时再开启
+        "noImgElement": "off"
+      },
+      "nursery": {
+        "useSortedClasses": {
+          "level": "warn",
+          "fix": "safe",
+          "options": {
+            "functions": ["clsx", "cva", "cn"]
+          }
+        }
+      }
+    }
+  },
+  "html": {
+    "formatter": {
+      "enabled": true
+    }
+  },
+  "javascript": {
+    "assist": {
+      "enabled": true
+    },
+    "formatter": {
+      "enabled": true,
+      "quoteStyle": "single"
+    },
+    "linter": {
+      "enabled": true
+    }
+  },
+  "css": {
+    "assist": {
+      "enabled": true
+    },
+    "formatter": {
+      "enabled": true
+    },
+    "linter": {
+      "enabled": true
+    },
+    "parser": {
+      "cssModules": true
+    }
+  }
+}

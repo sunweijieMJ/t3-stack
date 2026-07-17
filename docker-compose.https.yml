@@ -1,0 +1,19 @@
+# HTTPS override：用于需要 SSL 终端的场景（如 AWS EC2 + Let's Encrypt）。
+# 阿里云 ECS 等无 SSL 场景不应叠加本文件。
+#
+# 启用方式（推荐让 manage.sh 自动检测，无需手动指定 -f）：
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d
+#
+# 前置条件：宿主机 /etc/letsencrypt 下已有证书；nginx.https.conf 与本文件同步部署。
+#
+# 注意 compose 合并语义：ports / volumes 都是数组，默认按 append 合并 —
+# 所以这里追加 443 端口与 nginx.https.conf 挂载，主 compose 里的 80 端口和
+# nginx.conf 仍然生效，HTTP/HTTPS 双入口共存。
+
+services:
+  organova-nginx:
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx.https.conf:/etc/nginx/conf.d/https.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro

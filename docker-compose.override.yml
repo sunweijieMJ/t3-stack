@@ -1,0 +1,14 @@
+# 本地开发覆盖配置（docker compose 自动加载）
+# 提供 build 配置和默认镜像名，服务器上不存在此文件
+services:
+  organova-app:
+    image: organova-app:local
+    build:
+      context: .
+      target: runner
+
+  organova-nginx:
+    image: organova-nginx:local
+    build:
+      context: .
+      target: nginx

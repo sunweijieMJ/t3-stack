@@ -1,0 +1,23 @@
+/* biome-ignore lint/suspicious/noUnknownAtRules: UnoCSS directive */
+@unocss all;
+
+/* 门户全局排版/布局 token —— 统一各 hero、section 的 padding/标题样式
+ * 字体变量来自 src/app/layout.tsx 注入的 next/font CSS 变量
+ */
+:root {
+  --portal-content-pad-x: 240px;
+  --portal-content-max: 1440px;
+  --portal-hero-font-family:
+    var(--font-roboto-serif), "Roboto Serif", Georgia, serif;
+  --portal-hero-title-size: 64px;
+  --portal-hero-title-line: 1.17;
+  --portal-hero-subtitle-size: 24px;
+  --portal-hero-subtitle-line: 1.5;
+  --portal-body-font-family: var(--font-roboto), "Roboto", sans-serif;
+}
+
+/* portal 子树用 UnoCSS reset，会把 button background 设为 transparent；
+ * 用 .portal-root scope 把覆盖收敛到 portal，避免影响 admin AntD 按钮 token。 */
+.portal-root .ant-btn-primary:not(:disabled) {
+  background-color: var(--ant-color-primary, #ff6b3d);
+}

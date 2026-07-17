@@ -1,0 +1,235 @@
+import { TRPCError } from '@trpc/server';
+import { and, count, desc, eq, gte, ilike, lt, lte, min } from 'drizzle-orm';
+import { z } from 'zod';
+import { ACTION_LABELS } from '@/server/api/audit-action-labels';
+import {
+  adminProcedure,
+  createTRPCRouter,
+  protectedProcedure,
+} from '@/server/api/trpc';
+import { auth } from '@/server/better-auth';
+import { user } from '@/server/db/auth-schema';
+import { adminAuditLog } from '@/server/db/schema';
+import { isAdminEmail } from '@/server/services/admin-check';
+import {
+  getAuditPurgeConfig,
+  maybePurgeAuditLogs,
+  setAuditPurgeConfig,
+} from '@/server/services/audit-purge';
+
+// 转义 LIKE/ILIKE 通配符，避免用户输入 % / _ 把过滤变成全表匹配
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
+
+// 构建审计日志查询的 where 条件（listAuditLogs 和 exportAuditLogs 共用）
+function buildAuditLogWhere(input: {
+  startDate?: string;
+  endDate?: string;
+  action?: string;
+  userEmail?: string;
+}) {
+  const conditions = [];
+  if (input.startDate) {
+    conditions.push(gte(adminAuditLog.createdAt, new Date(input.startDate)));
+  }
+  if (input.endDate) {
+    conditions.push(lte(adminAuditLog.createdAt, new Date(input.endDate)));
+  }
+  if (input.action) {
+    conditions.push(eq(adminAuditLog.action, input.action));
+  }
+  if (input.userEmail) {
+    conditions.push(
+      ilike(adminAuditLog.userEmail, `%${escapeLikePattern(input.userEmail)}%`),
+    );
+  }
+  return conditions.length > 0 ? and(...conditions) : undefined;
+}
+
+export const adminRouter = createTRPCRouter({
+  checkRole: protectedProcedure.query(({ ctx }) => {
+    return isAdminEmail(ctx.session.user.email);
+  }),
+
+  // ---- 用户管理 ----
+
+  createUser: adminProcedure
+    .input(
+      z.object({
+        email: z.email(),
+        password: z.string().min(6),
+        name: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      try {
+        const result = await auth.api.signUpEmail({
+          body: {
+            email: input.email,
+            password: input.password,
+            name: input.name,
+          },
+        });
+        return {
+          id: result.user.id,
+          email: result.user.email,
+          name: result.user.name,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '';
+        if (msg.includes('already') || msg.includes('exist')) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: '该邮箱已被注册',
+          });
+        }
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: '创建用户失败',
+        });
+      }
+    }),
+
+  listUsers: adminProcedure.query(async ({ ctx }) => {
+    return ctx.db
+      .select({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        createdAt: user.createdAt,
+      })
+      .from(user)
+      .orderBy(desc(user.createdAt));
+  }),
+
+  deleteUser: adminProcedure
+    .input(z.object({ userId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      if (input.userId === ctx.session?.user.id) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: '不能删除自己的账户',
+        });
+      }
+      await ctx.db.delete(user).where(eq(user.id, input.userId));
+      return { success: true };
+    }),
+
+  // ---- 审计日志 ----
+
+  // 获取数据库中实际存在的操作类型列表（附带中文名）
+  listDistinctActions: adminProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.db
+      .selectDistinct({ action: adminAuditLog.action })
+      .from(adminAuditLog)
+      .orderBy(adminAuditLog.action);
+    return rows.map((r) => ({
+      value: r.action,
+      label: ACTION_LABELS[r.action] ?? r.action,
+    }));
+  }),
+
+  listAuditLogs: adminProcedure
+    .input(
+      z.object({
+        page: z.number().min(1).default(1),
+        pageSize: z.number().min(1).max(100).default(20),
+        startDate: z.iso.datetime().optional(),
+        endDate: z.iso.datetime().optional(),
+        action: z.string().max(128).optional(),
+        userEmail: z.string().max(256).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const where = buildAuditLogWhere(input);
+      const offset = (input.page - 1) * input.pageSize;
+
+      const [logs, countResult] = await Promise.all([
+        ctx.db
+          .select()
+          .from(adminAuditLog)
+          .where(where)
+          .orderBy(desc(adminAuditLog.createdAt))
+          .limit(input.pageSize)
+          .offset(offset),
+        ctx.db.select({ total: count() }).from(adminAuditLog).where(where),
+      ]);
+
+      return { logs, total: countResult[0]?.total ?? 0 };
+    }),
+
+  // 导出审计日志（返回全量数据，前端转 Excel）；改为 mutation 以走 auditMiddleware 留痕
+  exportAuditLogs: adminProcedure
+    .input(
+      z.object({
+        startDate: z.iso.datetime().optional(),
+        endDate: z.iso.datetime().optional(),
+        action: z.string().max(128).optional(),
+        userEmail: z.string().max(256).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const where = buildAuditLogWhere(input);
+      // 限制单次导出上限，避免长期运行后全表扫描导致 OOM
+      return ctx.db
+        .select()
+        .from(adminAuditLog)
+        .where(where)
+        .orderBy(desc(adminAuditLog.createdAt))
+        .limit(10000);
+    }),
+
+  // ---- 审计日志清理 ----
+
+  // 日志统计（总数 + 最早记录时间）；顺手触发懒清理（24h 频次保护，失败已被 service 自吞）
+  getAuditLogStats: adminProcedure.query(async ({ ctx }) => {
+    void maybePurgeAuditLogs();
+    const [countResult, minResult] = await Promise.all([
+      ctx.db.select({ total: count() }).from(adminAuditLog),
+      ctx.db
+        .select({ earliest: min(adminAuditLog.createdAt) })
+        .from(adminAuditLog),
+    ]);
+    return {
+      total: countResult[0]?.total ?? 0,
+      earliestDate: minResult[0]?.earliest?.toISOString() ?? null,
+    };
+  }),
+
+  // 自动清理配置（默认开启，保留 90 天）
+  getAuditPurgeConfig: adminProcedure.query(async () => {
+    return getAuditPurgeConfig();
+  }),
+
+  setAuditPurgeConfig: adminProcedure
+    .input(
+      z.object({
+        enabled: z.boolean(),
+        retentionDays: z.number().int().min(1).max(3650),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      await setAuditPurgeConfig(input);
+      return { success: true };
+    }),
+
+  // 手动清理指定日期之前的日志
+  purgeAuditLogs: adminProcedure
+    .input(
+      z.object({
+        beforeDate: z.string().datetime(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const deleted = await ctx.db
+        .delete(adminAuditLog)
+        .where(lt(adminAuditLog.createdAt, new Date(input.beforeDate)))
+        .returning({ id: adminAuditLog.id });
+      return { deleted: deleted.length };
+    }),
+
+  // 通用的 getConfig / setConfig 已移除：
+  // 所有系统配置都应通过专用接口（saveFrontendConfig / setAuditPurgeConfig / adminSetFilterTags 等）
+  // 写入，以保证 zod 校验与 audit 留痕，避免泛 key/value 写入绕过类型与约束。
+});

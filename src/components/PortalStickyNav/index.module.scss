@@ -1,0 +1,12 @@
+.wrapper {
+  position: sticky;
+  z-index: 1000;
+  bottom: 0;
+  transform: translateY(100%);
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+
+  &.visible {
+    transform: translateY(0);
+  }
+}
