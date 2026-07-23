@@ -65,18 +65,19 @@ export async function exportToXlsx<T>({
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(sheetName);
 
-  ws.columns = columns.map((col) => ({
+  // key 用列索引而非表头文本：避免两列表头相同时 key 冲突导致丢列
+  ws.columns = columns.map((col, i) => ({
     header: col.header,
-    key: col.header,
+    key: `col_${i}`,
     width: computeColumnWidth(col, rows),
   }));
 
   // 数据行
   for (const row of rows) {
     const values: Record<string, XlsxCellValue> = {};
-    for (const col of columns) {
-      values[col.header] = getCellValue(row, col);
-    }
+    columns.forEach((col, i) => {
+      values[`col_${i}`] = getCellValue(row, col);
+    });
     ws.addRow(values);
   }
 

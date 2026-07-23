@@ -1,16 +1,12 @@
 import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, gte, ilike, lt, lte, min } from 'drizzle-orm';
+import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { ACTION_LABELS } from '@/server/api/audit-action-labels';
-import {
-  adminProcedure,
-  createTRPCRouter,
-  protectedProcedure,
-} from '@/server/api/trpc';
+import { adminProcedure, createTRPCRouter } from '@/server/api/trpc';
 import { auth } from '@/server/better-auth';
 import { user } from '@/server/db/auth-schema';
 import { adminAuditLog } from '@/server/db/schema';
-import { isAdminEmail } from '@/server/services/admin-check';
 import {
   getAuditPurgeConfig,
   maybePurgeAuditLogs,
@@ -48,17 +44,15 @@ function buildAuditLogWhere(input: {
 }
 
 export const adminRouter = createTRPCRouter({
-  checkRole: protectedProcedure.query(({ ctx }) => {
-    return isAdminEmail(ctx.session.user.email);
-  }),
-
   // ---- 用户管理 ----
 
   createUser: adminProcedure
     .input(
       z.object({
         email: z.email(),
-        password: z.string().min(6),
+        // 密码可选：email-otp 模式下登录不使用密码，省略时服务端生成随机强密码占位，
+        // 避免管理员为不会被用到的密码凭空编一个。email-password 模式仍应由前端传入。
+        password: z.string().min(6).optional(),
         name: z.string().min(1),
       }),
     )
@@ -67,7 +61,7 @@ export const adminRouter = createTRPCRouter({
         const result = await auth.api.signUpEmail({
           body: {
             email: input.email,
-            password: input.password,
+            password: input.password ?? nanoid(24),
             name: input.name,
           },
         });

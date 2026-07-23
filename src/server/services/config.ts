@@ -12,35 +12,6 @@ const SITE_NAME_FALLBACK = 'Site';
 // 跨请求缓存 tag —— admin 保存配置时通过 revalidateTag(FRONTEND_CONFIG_TAG) 立即失效
 export const FRONTEND_CONFIG_TAG = 'frontend-config';
 
-export async function getConfigValue(key: string): Promise<string | null> {
-  try {
-    const row = await db
-      .select({ value: systemConfig.value })
-      .from(systemConfig)
-      .where(eq(systemConfig.key, key))
-      .limit(1);
-    if (row.length > 0 && row[0]?.value != null) {
-      const v = row[0]?.value;
-      return typeof v === 'string' ? v : String(v);
-    }
-    return null;
-  } catch (error) {
-    console.warn(
-      `[config] getConfigValue 读取失败，已降级为 null (key=${key}):`,
-      error,
-    );
-    return null;
-  }
-}
-
-export async function getConfigString(
-  key: string,
-  fallback: string,
-): Promise<string> {
-  const value = await getConfigValue(key);
-  return value ?? fallback;
-}
-
 // 跨请求持久缓存的底层读取。tag 让 saveFrontendConfig 后通过 revalidateTag
 // 立即失效；revalidate 60s 兜底（即使 admin 直接改库也会在 1 分钟内生效）。
 // 注意：try/catch 必须放在 cached 函数 **外面**——否则 DB 抖动时的默认配置会被

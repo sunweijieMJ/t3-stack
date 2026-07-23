@@ -66,11 +66,13 @@ async function main() {
   const password = secret.password;
   const sslmode = stripQuotes(process.env.DB_SSLMODE) || 'require';
 
-  const missing: string[] = [];
-  if (!host) missing.push('host');
-  if (!user) missing.push('user');
-  if (!password) missing.push('password');
-  if (missing.length > 0) {
+  // 用组合条件而非 missing 数组做守卫：这样 TS 能把 host/user/password 收窄为
+  // 非空 string，后续拼接无需非空断言（!）。
+  if (!host || !user || !password) {
+    const missing: string[] = [];
+    if (!host) missing.push('host');
+    if (!user) missing.push('user');
+    if (!password) missing.push('password');
     process.stderr.write(
       `[resolve-db-url] missing required field(s): ${missing.join(', ')}\n`,
     );
@@ -78,7 +80,7 @@ async function main() {
     return;
   }
 
-  const url = `postgresql://${encodeURIComponent(user!)}:${encodeURIComponent(password!)}@${host}:${port}/${dbname}?sslmode=${sslmode}`;
+  const url = `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${dbname}?sslmode=${sslmode}`;
   process.stdout.write(url);
 }
 

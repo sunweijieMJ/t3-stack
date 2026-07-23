@@ -406,7 +406,7 @@ export default function AdminAuditLogsView() {
           wrapperCol={{ span: 14 }}
         >
           <Form.Item
-            extra="开启后每次写入审计日志会顺带触发清理（每 24 小时最多一次）"
+            extra="开启后每次进入本页时检查并清理过期日志（每 24 小时最多执行一次）"
             label="启用自动清理"
             name="enabled"
             valuePropName="checked"
