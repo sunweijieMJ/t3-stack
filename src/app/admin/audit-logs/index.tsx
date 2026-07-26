@@ -81,8 +81,9 @@ export default function AdminAuditLogsView() {
     userEmail: userEmail || undefined,
   };
 
-  const { data, isLoading, refetch } =
-    api.sys.listAuditLogs.useQuery(queryInput);
+  const utils = api.useUtils();
+
+  const { data, isLoading } = api.sys.listAuditLogs.useQuery(queryInput);
 
   const { data: actionOptions } = api.sys.listDistinctActions.useQuery();
   const { data: stats } = api.sys.getAuditLogStats.useQuery();
@@ -92,7 +93,11 @@ export default function AdminAuditLogsView() {
   const purgeMutation = api.sys.purgeAuditLogs.useMutation({
     onSuccess: (res) => {
       message.success(`已清理 ${res.deleted} 条日志`);
-      void refetch();
+      // 清理会同时影响三处，都要失效：日志列表、统计（tooltip 里的「最早记录」时间）、
+      // 操作类型下拉（被清掉的 action 可能已不存在于表中）。
+      void utils.sys.listAuditLogs.invalidate();
+      void utils.sys.getAuditLogStats.invalidate();
+      void utils.sys.listDistinctActions.invalidate();
     },
     onError: (err) => message.error(err.message ?? '清理失败'),
   });
@@ -120,7 +125,7 @@ export default function AdminAuditLogsView() {
   const handleExport = async () => {
     setExporting(true);
     try {
-      const rows = await exportMutation.mutateAsync({
+      const res = await exportMutation.mutateAsync({
         startDate: queryInput.startDate,
         endDate: queryInput.endDate,
         action,
@@ -130,8 +135,15 @@ export default function AdminAuditLogsView() {
         filename: 'audit_logs',
         sheetName: '审计日志',
         columns: buildAuditExportColumns(actionLabelMap),
-        rows: rows as AuditLog[],
+        rows: res.rows,
       });
+      // 命中导出上限时必须明确告知，否则用户会以为导出的是全量数据
+      if (res.truncated) {
+        message.warning(
+          `符合条件的日志超过 ${res.limit} 条，本次仅导出最近 ${res.limit} 条，请缩小时间范围后分批导出`,
+          8,
+        );
+      }
     } catch {
       message.error('导出失败');
     } finally {

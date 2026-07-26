@@ -13,6 +13,11 @@ import {
   setAuditPurgeConfig,
 } from '@/server/services/audit-purge';
 
+// 单次导出的行数上限，避免长期运行后全表扫描导致 OOM。
+// 命中上限时会通过返回值告知前端，由前端提示用户缩小范围分批导出——
+// 不能静默截断，否则用户会以为导全了。
+const AUDIT_EXPORT_LIMIT = 10_000;
+
 // 转义 LIKE/ILIKE 通配符，避免用户输入 % / _ 把过滤变成全表匹配
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (m) => `\\${m}`);
@@ -165,13 +170,19 @@ export const adminRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const where = buildAuditLogWhere(input);
-      // 限制单次导出上限，避免长期运行后全表扫描导致 OOM
-      return ctx.db
+      // 多取 1 条用于精确判断是否被截断（总数正好等于上限时不误报）
+      const rows = await ctx.db
         .select()
         .from(adminAuditLog)
         .where(where)
         .orderBy(desc(adminAuditLog.createdAt))
-        .limit(10000);
+        .limit(AUDIT_EXPORT_LIMIT + 1);
+      const truncated = rows.length > AUDIT_EXPORT_LIMIT;
+      return {
+        rows: truncated ? rows.slice(0, AUDIT_EXPORT_LIMIT) : rows,
+        truncated,
+        limit: AUDIT_EXPORT_LIMIT,
+      };
     }),
 
   // ---- 审计日志清理 ----
@@ -212,7 +223,8 @@ export const adminRouter = createTRPCRouter({
   purgeAuditLogs: adminProcedure
     .input(
       z.object({
-        beforeDate: z.string().datetime(),
+        // 与本文件其他日期入参保持一致的写法（z.string().datetime() 等价但不统一）
+        beforeDate: z.iso.datetime(),
       }),
     )
     .mutation(async ({ ctx, input }) => {

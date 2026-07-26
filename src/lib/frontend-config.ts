@@ -142,17 +142,65 @@ export function mergeConfig(
 
 // ==================== 运行时校验（zod） ====================
 
+// 单个字符串字段的长度上限。配置整体存在 systemConfig 的一行 jsonb 里，
+// 不设上限的话单个字段就能把这行撑到任意大小。8192 远高于任何真实文案长度。
+const MAX_STRING_LEN = 8192;
+// URL 类字段更短：既没有正常场景需要超长链接，也限制了被塞进 href/src 的体积。
+const MAX_URL_LEN = 2048;
+
+// 只放行 http / https。配置值会被直接渲染成 <a href> 与 <img src>
+// （如 PortalFooter 的 icpLink），不做协议白名单的话管理员可写入
+// javascript: / data: 等可执行伪协议。虽然只有管理员能写（自我 XSS，低危），
+// 但堵住的成本极低。
+function isSafeHttpUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+// 站内相对路径：单个 / 开头。排除 //host 形式的协议相对 URL，
+// 那会被浏览器解析成跨域绝对地址。
+function isSiteRelativePath(value: string): boolean {
+  return value.startsWith('/') && !value.startsWith('//');
+}
+
+// inputType='url'：外链字段，必须是完整的 http(s) 链接（空串表示未配置）。
+const externalUrlSchema = z
+  .string()
+  .max(MAX_URL_LEN)
+  .refine((v) => v === '' || isSafeHttpUrl(v), {
+    message: '必须是 http:// 或 https:// 开头的完整链接',
+  });
+
+// inputType='image' / 'file'：由 /api/upload 回填。local 存储回相对路径
+// /uploads/...，OSS 存储回绝对 URL，两种都要放行（空串表示未上传）。
+const assetUrlSchema = z
+  .string()
+  .max(MAX_URL_LEN)
+  .refine((v) => v === '' || isSiteRelativePath(v) || isSafeHttpUrl(v), {
+    message: '必须是站内路径（/ 开头）或 http(s) 链接',
+  });
+
 // 将 JsonSchema 节点转换为对应的 zod 校验器。
 function nodeToZod(node: JsonSchema): z.ZodType {
   switch (node.type) {
     case 'string': {
       if (node.inputType === 'i18n') {
-        return z.record(z.string(), z.string());
+        return z.record(z.string(), z.string().max(MAX_STRING_LEN));
       }
       if (node.enumType && node.enumType.length > 0) {
         return z.enum(node.enumType as readonly [string, ...string[]]);
       }
-      return z.string();
+      if (node.inputType === 'url') {
+        return externalUrlSchema;
+      }
+      if (node.inputType === 'image' || node.inputType === 'file') {
+        return assetUrlSchema;
+      }
+      return z.string().max(MAX_STRING_LEN);
     }
     case 'number': {
       let n: z.ZodNumber = z.number();

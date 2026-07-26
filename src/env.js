@@ -99,3 +99,41 @@ export const env = createEnv({
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
   emptyStringAsUndefined: true,
 });
+
+// ==================== 跨字段条件必填 ====================
+// createEnv 只能逐字段校验，表达不了「打开某个开关后哪些变量才必填」。
+// 这里补齐，目的是把故障提前到进程启动：
+//   - 否则 SMTP 缺失要等第一个用户点「获取验证码」才在运行时抛错（登录直接不可用）
+//   - OSS 配置缺失要等管理员上传图片才由 requireOssConfig() 抛错
+// 跳过条件：
+//   - SKIP_ENV_VALIDATION：构建期（Dockerfile）与单测，此时本就拿不到真实变量
+//   - 浏览器环境：env 代理在客户端读取 server 段变量会直接抛错
+if (typeof window === 'undefined' && !process.env.SKIP_ENV_VALIDATION) {
+  /** @type {string[]} */
+  const missing = [];
+
+  // email-otp 模式的验证码只能靠邮件送达，生产环境缺 SMTP 等于登录功能不可用
+  if (env.NODE_ENV === 'production' && env.AUTH_METHOD === 'email-otp') {
+    if (!env.SMTP_USER)
+      missing.push('SMTP_USER（AUTH_METHOD=email-otp 时必填）');
+    if (!env.SMTP_PASS)
+      missing.push('SMTP_PASS（AUTH_METHOD=email-otp 时必填）');
+  }
+
+  if (env.STORAGE_PROVIDER === 'oss') {
+    if (!env.OSS_REGION)
+      missing.push('OSS_REGION（STORAGE_PROVIDER=oss 时必填）');
+    if (!env.OSS_ACCESS_KEY_ID)
+      missing.push('OSS_ACCESS_KEY_ID（STORAGE_PROVIDER=oss 时必填）');
+    if (!env.OSS_ACCESS_KEY_SECRET)
+      missing.push('OSS_ACCESS_KEY_SECRET（STORAGE_PROVIDER=oss 时必填）');
+    if (!env.OSS_BUCKET)
+      missing.push('OSS_BUCKET（STORAGE_PROVIDER=oss 时必填）');
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `❌ 环境变量校验失败，以下变量在当前配置下必填:\n  - ${missing.join('\n  - ')}`,
+    );
+  }
+}

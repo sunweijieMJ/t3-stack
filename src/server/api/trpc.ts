@@ -138,6 +138,11 @@ function sanitizeInput(input: unknown): unknown {
 /**
  * 审计日志中间件 —— 记录所有 admin mutation 操作到 adminAuditLog 表。
  *
+ * 挂载位置很关键：它必须挂在**管理员校验之前**（见 adminProcedure），
+ * 这样已登录但不在 ADMIN_EMAILS 白名单里的用户发起的越权尝试也会被记为
+ * result='error' + errorMessage='Admin access required'。安全审计最需要的
+ * 恰恰是这类被拒记录；挂在校验之后会导致越权尝试一条都不留痕。
+ *
  * 设计：写入采用 fire-and-forget（不 await），让业务响应不被 DB I/O 阻塞。
  * Standalone 长进程下，Node 事件循环会自然 flush 写入；如果未来迁移到 serverless
  * 需要响应后保活异步任务，请改用 next/server 的 after() 包裹 writeLog。
@@ -147,8 +152,11 @@ function sanitizeInput(input: unknown): unknown {
  */
 const auditMiddleware = t.middleware(
   async ({ ctx, next, path, type, getRawInput }) => {
-    if (type !== 'mutation') return next({ ctx });
-    if (!ctx.session?.user) return next({ ctx });
+    // 一律用无参 next()：传 next({ ctx }) 会把 ctx 类型重置回根 context，
+    // 抹掉 protectedProcedure 对 session 的非空收窄，导致后续中间件里
+    // ctx.session 又变成可能为 null。本中间件不改 ctx，无参透传即可。
+    if (type !== 'mutation') return next();
+    if (!ctx.session?.user) return next();
 
     const sessionUser = ctx.session.user;
     const rawInput = await getRawInput();
@@ -164,7 +172,7 @@ const auditMiddleware = t.middleware(
     };
 
     try {
-      const result = await next({ ctx });
+      const result = await next();
       writeLog({
         userId: sessionUser.id,
         userEmail: sessionUser.email,
@@ -194,9 +202,13 @@ const auditMiddleware = t.middleware(
 /**
  * 管理员专用过程 —— 邮箱在 ADMIN_EMAILS 白名单中即可访问。
  * 继承自 protectedProcedure，确保登录态校验保持一致。
- * 所有 mutation 操作自动记录审计日志。
+ * 所有 mutation 操作自动记录审计日志（含被 FORBIDDEN 拒绝的越权尝试）。
+ *
+ * 中间件顺序：auditMiddleware 在前，admin 校验在后。tRPC 的 .use() 是由外向内
+ * 包裹，所以先注册的 audit 能捕获后注册的 admin 校验抛出的 FORBIDDEN。
  */
 export const adminProcedure = protectedProcedure
+  .use(auditMiddleware)
   .use(({ ctx, next }) => {
     if (!isAdminEmail(ctx.session.user.email)) {
       throw new TRPCError({
@@ -205,5 +217,4 @@ export const adminProcedure = protectedProcedure
       });
     }
     return next({ ctx });
-  })
-  .use(auditMiddleware);
+  });

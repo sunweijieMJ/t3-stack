@@ -7,6 +7,26 @@ import { frontendConfigSchema } from '@/constants/frontend-config';
 import { type FrontendConfig, mergeConfig } from '@/lib/frontend-config';
 import { api } from '@/lib/trpc/react';
 
+type ZodFieldErrors = Record<string, string[] | undefined>;
+
+// 把服务端 zod 校验失败翻译成「哪个配置分区 + 什么原因」。
+// zod 的 flatten() 只保留 path[0]，所以粒度是 section（basic / seo / footer / social），
+// 已经足够定位；不做这层展示的话，URL 协议与长度校验命中时用户只会看到笼统的
+// 「保存失败，请重试」，根本不知道是哪个字段填错了。
+function describeValidationError(
+  fieldErrors: ZodFieldErrors | undefined | null,
+): string | null {
+  if (!fieldErrors) return null;
+  const parts = Object.entries(fieldErrors).map(([key, messages]) => {
+    const section =
+      frontendConfigSchema[key as keyof typeof frontendConfigSchema];
+    const label = section?.title ?? key;
+    const reason = messages?.[0];
+    return reason ? `${label}「${reason}」` : label;
+  });
+  return parts.length > 0 ? `配置校验失败：${parts.join('；')}` : null;
+}
+
 export default function AdminSettingPage() {
   const { message, modal } = App.useApp();
   const {
@@ -28,31 +48,39 @@ export default function AdminSettingPage() {
     void refetch();
   }, [message, refetch]);
 
+  // CONFLICT → 拉最新版本；校验失败 → 指出具体分区与原因；其余 → 场景兜底文案
+  const buildErrorHandler = useCallback(
+    (fallback: string) =>
+      (err: {
+        data?: {
+          code?: string;
+          zodError?: { fieldErrors?: ZodFieldErrors } | null;
+        } | null;
+      }) => {
+        if (err.data?.code === 'CONFLICT') {
+          handleConflict();
+          return;
+        }
+        message.error(
+          describeValidationError(err.data?.zodError?.fieldErrors) ?? fallback,
+        );
+      },
+    [handleConflict, message],
+  );
+
   const saveMutation = api.page.saveFrontendConfig.useMutation({
     onSuccess: () => {
       message.success('配置已保存');
       void refetch();
     },
-    onError: (err) => {
-      if (err.data?.code === 'CONFLICT') {
-        handleConflict();
-      } else {
-        message.error('保存失败，请重试');
-      }
-    },
+    onError: buildErrorHandler('保存失败，请重试'),
   });
   const resetMutation = api.page.saveFrontendConfig.useMutation({
     onSuccess: () => {
       message.success('已恢复默认配置');
       void refetch();
     },
-    onError: (err) => {
-      if (err.data?.code === 'CONFLICT') {
-        handleConflict();
-      } else {
-        message.error('恢复失败，请重试');
-      }
-    },
+    onError: buildErrorHandler('恢复失败，请重试'),
   });
 
   const savedConfig = useMemo(
