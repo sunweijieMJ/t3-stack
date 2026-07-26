@@ -31,6 +31,15 @@ if (method === 'email-otp') {
       },
       otpLength: 6,
       expiresIn: 600, // 10 分钟，留足邮件投递延迟余量
+      // 必须为 true，否则任何人都能自助注册：插件默认（false）下
+      // /email-otp/send-verification-otp 会给「库里不存在的邮箱」也发验证码，
+      // 随后 /sign-in/email-otp 验证通过时直接 createUser + 下发 session
+      // （见 better-auth/dist/plugins/email-otp/routes.mjs 的 shouldSendOTP 与 disableSignUp 分支）。
+      // 这条路绕开了 route.ts 对 /sign-up/email 的封堵——那里只挡住了密码注册。
+      // 注意：这是 emailOTP 插件自己的选项，与下方 emailAndPassword.disableSignUp
+      // 不是同一个东西，不会影响 auth.api.signUpEmail() 的内部调用。
+      // 开启后：未知邮箱的发送请求静默返回 success（不产生用户枚举泄漏），验证时报 INVALID_OTP。
+      disableSignUp: true,
       // 允许的错误次数：插件默认 3 太低，手输验证码很容易因几次手误就触顶。
       // 注意：达到上限后插件会直接删除该验证码，之后即使输对也会判为「不正确」，
       // 必须重新获取——这正是「输错几次后输对仍报错」问题的根源，由 env 统一放宽。
