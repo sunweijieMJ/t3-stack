@@ -30,13 +30,7 @@ fi
 # 否则健康检查会去探一个根本没有暴露的端口
 PORT="${HOST_PORT:-80}"
 
-# 自动叠加 HTTPS override：当部署目录存在 docker-compose.https.yml 时启用 SSL
-# （AWS EC2 走这个；阿里云 ECS 不拷该文件，自然按 HTTP 部署）
-# docker compose 原生通过 COMPOSE_FILE 环境变量按顺序合并多份 compose 文件
 COMPOSE_FILE="docker-compose.yml"
-if [ -f "docker-compose.https.yml" ]; then
-    COMPOSE_FILE="${COMPOSE_FILE}:docker-compose.https.yml"
-fi
 export COMPOSE_FILE
 
 # 日志函数

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { env } from '@/env';
 
 /**
- * 上传文件到配置的存储后端（local / OSS / S3）。
+ * 上传文件到配置的存储后端（local / OSS）。
  * 返回文件的公开访问 URL。
  * downloadName 为 PDF 等需要"下载而非内联打开"的场景指定，会被写入
  * Content-Disposition: attachment header，让浏览器走下载流程而不是直接渲染。
@@ -20,8 +20,6 @@ export async function uploadFile(
   switch (env.STORAGE_PROVIDER) {
     case 'oss':
       return uploadToOss(key, buffer, contentType, downloadName);
-    case 's3':
-      return uploadToS3(key, buffer, contentType, downloadName);
     default:
       return uploadToLocal(module, fileName, buffer);
   }
@@ -47,7 +45,7 @@ async function uploadToLocal(
 
 /**
  * 从 URL 中解析出存储 key（uploads/<module>/<file>）。
- * 同时兼容 OSS / S3 的绝对 URL 与 local 的相对路径 /uploads/...。
+ * 同时兼容 OSS 的绝对 URL 与 local 的相对路径 /uploads/...。
  * 不属于本系统上传的外链返回 null（避免误删第三方资源）。
  */
 function parseStorageKey(url: string): string | null {
@@ -86,25 +84,6 @@ export async function deleteFile(
           bucket,
         });
         await client.delete(key);
-        return;
-      }
-      case 's3': {
-        const { region, accessKeyId, secretAccessKey, bucket, endpoint } =
-          requireS3Config();
-        const { S3Client, DeleteObjectCommand } = await import(
-          '@aws-sdk/client-s3'
-        );
-        const client = new S3Client({
-          region,
-          ...(accessKeyId && secretAccessKey
-            ? { credentials: { accessKeyId, secretAccessKey } }
-            : {}),
-          ...(endpoint ? { endpoint } : {}),
-          forcePathStyle: !!endpoint,
-        });
-        await client.send(
-          new DeleteObjectCommand({ Bucket: bucket, Key: key }),
-        );
         return;
       }
       default: {
@@ -152,42 +131,6 @@ async function uploadToOss(
   return `${base}/${key}`;
 }
 
-async function uploadToS3(
-  key: string,
-  buffer: Buffer,
-  contentType: string,
-  downloadName?: string,
-): Promise<string> {
-  const { region, accessKeyId, secretAccessKey, bucket, endpoint, baseUrl } =
-    requireS3Config();
-  const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
-  const client = new S3Client({
-    region,
-    // 未提供 Access Key 时不传 credentials，自动使用 IAM Role（EC2/ECS 环境）
-    ...(accessKeyId && secretAccessKey
-      ? { credentials: { accessKeyId, secretAccessKey } }
-      : {}),
-    ...(endpoint ? { endpoint } : {}),
-    // 使用自定义 endpoint 时强制 path-style，兼容 MinIO 等服务
-    forcePathStyle: !!endpoint,
-  });
-  await client.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: contentType,
-      ...(downloadName
-        ? { ContentDisposition: buildContentDisposition(downloadName) }
-        : {}),
-    }),
-  );
-  const defaultBase = endpoint
-    ? `${endpoint}/${bucket}`
-    : `https://${bucket}.s3.${region}.amazonaws.com`;
-  return `${baseUrl ?? defaultBase}/${key}`;
-}
-
 function requireOssConfig() {
   const {
     OSS_REGION,
@@ -212,27 +155,5 @@ function requireOssConfig() {
     accessKeySecret: OSS_ACCESS_KEY_SECRET,
     bucket: OSS_BUCKET,
     baseUrl: OSS_BASE_URL,
-  };
-}
-
-function requireS3Config() {
-  const {
-    S3_REGION,
-    S3_ACCESS_KEY_ID,
-    S3_SECRET_ACCESS_KEY,
-    S3_BUCKET,
-    S3_ENDPOINT,
-    S3_BASE_URL,
-  } = env;
-  if (!S3_REGION || !S3_BUCKET) {
-    throw new Error('STORAGE_PROVIDER=s3 时必须配置 S3_REGION / S3_BUCKET');
-  }
-  return {
-    region: S3_REGION,
-    accessKeyId: S3_ACCESS_KEY_ID,
-    secretAccessKey: S3_SECRET_ACCESS_KEY,
-    bucket: S3_BUCKET,
-    endpoint: S3_ENDPOINT,
-    baseUrl: S3_BASE_URL,
   };
 }

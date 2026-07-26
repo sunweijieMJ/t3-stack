@@ -35,23 +35,15 @@
         // 泛型配置工具类（ConfigEditor、frontend-config）中 any 是合理的
         "noExplicitAny": "off"
       },
-      "security": {
-        // CMS 富文本渲染使用 dangerouslySetInnerHTML，项目内统一如此；
-        // 内容来自受信任的后台，不做全局关闭但降为警告提醒
-        "noDangerouslySetInnerHtml": "warn"
-      },
       "performance": {
-        // 项目未配置 next/image 远程域名，大量静态 SVG/图标也无需优化
-        // 后续统一迁移 next/image 时再开启
+        // ImageUploader 预览用原生 <img>（对象存储图片，尺寸不定），
+        // 后续统一迁移 next/image 时再开启此规则
         "noImgElement": "off"
       },
       "nursery": {
         "useSortedClasses": {
           "level": "warn",
-          "fix": "safe",
-          "options": {
-            "functions": ["clsx", "cva", "cn"]
-          }
+          "fix": "safe"
         }
       }
     }

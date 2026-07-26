@@ -57,21 +57,14 @@ export const env = createEnv({
     // 运行时变量，通过服务端注入到客户端，改 .env 重启即可生效
     AUTH_METHOD: z.enum(['email-otp', 'email-password']).default('email-otp'),
 
-    // 文件存储：local | oss | s3
-    STORAGE_PROVIDER: z.enum(['local', 'oss', 's3']).default('local'),
+    // 文件存储：local | oss
+    STORAGE_PROVIDER: z.enum(['local', 'oss']).default('local'),
     // 阿里云 OSS（STORAGE_PROVIDER=oss 时必填）
     OSS_REGION: z.string().optional(),
     OSS_ACCESS_KEY_ID: z.string().optional(),
     OSS_ACCESS_KEY_SECRET: z.string().optional(),
     OSS_BUCKET: z.string().optional(),
     OSS_BASE_URL: z.string().optional(), // CDN 或自定义域名，不填则用默认 bucket 域名
-    // AWS S3（STORAGE_PROVIDER=s3 时必填）
-    S3_REGION: z.string().optional(),
-    S3_ACCESS_KEY_ID: z.string().optional(),
-    S3_SECRET_ACCESS_KEY: z.string().optional(),
-    S3_BUCKET: z.string().optional(),
-    S3_ENDPOINT: z.string().optional(), // 兼容其他 S3 协议服务时填写
-    S3_BASE_URL: z.string().optional(), // CDN 或自定义域名
   },
 
   client: {},
@@ -101,12 +94,6 @@ export const env = createEnv({
     OSS_ACCESS_KEY_SECRET: stripQuotes(process.env.OSS_ACCESS_KEY_SECRET),
     OSS_BUCKET: stripQuotes(process.env.OSS_BUCKET),
     OSS_BASE_URL: stripQuotes(process.env.OSS_BASE_URL),
-    S3_REGION: stripQuotes(process.env.S3_REGION),
-    S3_ACCESS_KEY_ID: stripQuotes(process.env.S3_ACCESS_KEY_ID),
-    S3_SECRET_ACCESS_KEY: stripQuotes(process.env.S3_SECRET_ACCESS_KEY),
-    S3_BUCKET: stripQuotes(process.env.S3_BUCKET),
-    S3_ENDPOINT: stripQuotes(process.env.S3_ENDPOINT),
-    S3_BASE_URL: stripQuotes(process.env.S3_BASE_URL),
   },
 
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,

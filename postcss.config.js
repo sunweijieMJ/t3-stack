@@ -17,9 +17,7 @@ export default {
       // node_modules 通常不走 PostCSS，写上是为了双保险。
       exclude: [
         /[\\/]admin[\\/]/,
-        /[\\/]RichTextEditor[\\/]/,
         /[\\/]ConfigEditor[\\/]/,
-        /[\\/]DraggableTable[\\/]/,
         /[\\/]ImageUploader[\\/]/,
         /node_modules/,
       ],

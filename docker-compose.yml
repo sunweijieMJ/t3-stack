@@ -24,10 +24,7 @@ services:
   organova-nginx:
     image: ${NGINX_IMAGE:?NGINX_IMAGE is required}
     restart: unless-stopped
-    # 默认仅 HTTP（适合阿里云 ECS 等无 SSL 场景）
-    # 需要 HTTPS（如 AWS EC2 + Let's Encrypt）请额外叠加 docker-compose.https.yml：
-    #   docker compose -f docker-compose.yml -f docker-compose.https.yml up
-    # manage.sh 会自动检测并叠加该 override 文件
+    # 仅 HTTP。需要 HTTPS 时建议由宿主机反向代理（外层 nginx / 云负载均衡）终止 SSL。
     ports:
       - "${HOST_PORT:-80}:80"
     volumes:

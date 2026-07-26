@@ -4,12 +4,12 @@ import { env } from './src/env.js';
  * @typedef {{ protocol: 'http' | 'https'; hostname: string }} RemotePattern
  */
 
-// 把 OSS / S3 / S3 兼容服务的 base URL 解析为 next/image 的 remotePatterns，
+// 把 OSS base URL 解析为 next/image 的 remotePatterns，
 // 让管理员上传到对象存储的图片可以经 next/image 渲染。
 /** @returns {RemotePattern[]} */
 const buildRemotePatterns = () => {
   /** @type {string[]} */
-  const urls = [env.OSS_BASE_URL, env.S3_BASE_URL, env.S3_ENDPOINT].filter(
+  const urls = [env.OSS_BASE_URL].filter(
     /** @returns {v is string} */
     (v) => typeof v === 'string' && v.length > 0,
   );
@@ -35,8 +35,8 @@ const buildRemotePatterns = () => {
 /** @type {import("next").NextConfig} */
 const config = {
   output: 'standalone',
-  // ali-oss 和 @aws-sdk/client-s3 含 Node.js 原生依赖，不能被 Turbopack 打包
-  serverExternalPackages: ['ali-oss', '@aws-sdk/client-s3'],
+  // ali-oss 含 Node.js 原生依赖，不能被 Turbopack 打包
+  serverExternalPackages: ['ali-oss'],
   images: {
     remotePatterns: buildRemotePatterns(),
   },
