@@ -60,15 +60,6 @@ build_docker_images() {
     docker build --platform "${platform}" -t "${nginxImageTag}" --target nginx .
 }
 
-# 计算文件 MD5
-calc_md5() {
-    if command -v md5sum >/dev/null 2>&1; then
-        md5sum "$1" | awk '{ print $1 }'
-    else
-        md5 -q "$1"
-    fi
-}
-
 # 准备部署文件
 prepare_deployment_files() {
     log_info "Preparing deployment files..."
@@ -89,22 +80,20 @@ prepare_deployment_files() {
     cp nginx.conf deploy_package/
     cp .env.example deploy_package/
     cp manage.sh deploy_package/
-
-    # 计算 MD5
-    local app_md5
-    app_md5=$(calc_md5 "deploy_package/${app_tar}")
-    local nginx_md5
-    nginx_md5=$(calc_md5 "deploy_package/${nginx_tar}")
+    # 显式补可执行位：tar 会原样保留模式，运维解包后要直接 ./manage.sh update
+    chmod +x deploy_package/manage.sh
 
     # 写入构建信息（变量名与 docker-compose.yml 对齐，可直接 source）
+    # 这里曾额外写 APP_DOCKER_MD5 / NGINX_DOCKER_MD5，已移除：
+    # manage.sh 从来不校验它们，而 docker load 本身会校验镜像 layer 的 digest，
+    # tar 传输损坏会直接 load 失败。留一个「算了但从不校验」的字段，
+    # 反而会让人误以为有完整性保护。
     cat > deploy_package/build_info.sh << EOF
 COMMIT_HASH="${gitHash}"
 BUILD_AT="${dateTime}"
 BRANCH="${gitBranch}"
 APP_IMAGE="${appImageTag}"
 NGINX_IMAGE="${nginxImageTag}"
-APP_DOCKER_MD5="${app_md5}"
-NGINX_DOCKER_MD5="${nginx_md5}"
 EOF
 }
 
@@ -115,13 +104,15 @@ main() {
     # 解析参数
     platform="linux/amd64"
     local arch="amd64"
+    local allow_dirty=false
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --arm64)  platform="linux/arm64"; arch="arm64"; shift ;;
             --amd64)  platform="linux/amd64"; arch="amd64"; shift ;;
+            --allow-dirty) allow_dirty=true; shift ;;
             *)
                 log_error "未知参数: $1"
-                echo "用法: $0 [--arm64|--amd64]"
+                echo "用法: $0 [--arm64|--amd64] [--allow-dirty]"
                 exit 1
                 ;;
         esac
@@ -133,6 +124,20 @@ main() {
     # 定义变量
     gitBranch=$(git rev-parse --abbrev-ref HEAD)
     gitHash=$(git rev-parse --short HEAD)
+
+    # 镜像 tag 用 commit hash，但 Dockerfile 是 COPY . . —— 未提交的改动会一起被打进镜像。
+    # 不拦住的话，同一个 tag 可能对应完全不同的产物，「上传旧包按 tag 回滚」就不可靠了。
+    if [ -n "$(git status --porcelain)" ]; then
+        if [ "$allow_dirty" = false ]; then
+            log_error "工作区有未提交的改动，构建产物将与 commit ${gitHash} 不一致。"
+            log_error "请先提交（或 stash），或显式使用 --allow-dirty 构建调试包。"
+            git status --short >&2
+            exit 1
+        fi
+        # 允许脏构建时，给 tag 打上 -dirty，让产物自己说明来源不可复现
+        gitHash="${gitHash}-dirty"
+        log_error "警告：工作区不干净，镜像 tag 已标记为 ${gitHash}（不可复现，勿用于生产）"
+    fi
     dateTime=$(date "+%Y-%m-%d_%H-%M-%S")
     imagePrefix='organova-app'
     appImageTag="${imagePrefix}:${gitHash}"

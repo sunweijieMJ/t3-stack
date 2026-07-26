@@ -9,11 +9,11 @@ Organova 官网全栈项目，包含一个门户首页和一个仅提供系统�
 | 框架 | [Next.js 16](https://nextjs.org) (App Router + Turbopack) |
 | API | [tRPC](https://trpc.io) — 端到端类型安全 |
 | ORM | [Drizzle ORM](https://orm.drizzle.team) |
-| 数据库 | [PostgreSQL 16](https://www.postgresql.org/) |
+| 数据库 | [PostgreSQL 18](https://www.postgresql.org/) |
 | 认证 | [Better Auth](https://www.better-auth.com/)（邮箱验证码 / 邮箱密码） |
 | CSS | [UnoCSS](https://unocss.dev/) + [Ant Design](https://ant.design/)（后台） |
 | 校验 | [Zod](https://zod.dev/) |
-| 文件存储 | 本地 / 阿里云 OSS / AWS S3 |
+| 文件存储 | 本地 / 阿里云 OSS |
 
 ## 工程化
 
@@ -102,15 +102,19 @@ pnpm dev
 - `email-otp`（默认）— 邮箱验证码登录，需配置 SMTP
 - `email-password` — 邮箱密码登录
 
-管理员账号只能通过后台「创建用户」（内部调用 Better Auth，不经过公开注册端点）创建，站点不提供公开注册入口。
+站点不提供任何公开注册入口，账号只能由服务端内部创建：
+
+- `scripts/seed-admin.ts`（Docker 启动时通过 `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` 自动执行）
+- tRPC 的 `sys.createUser`（内部调用 Better Auth，不经过公开注册端点；后台暂未提供对应页面入口）
+
+两条公开注册路径都已封堵：`/api/auth/sign-up/email` 在 HTTP 层返回 404，emailOTP 插件开启 `disableSignUp`（否则任意邮箱都能凭验证码自助建号）。
 
 ### 文件存储
 
 通过 `STORAGE_PROVIDER` 切换：
 
-- `local`（默认）— 存储到 `public/uploads/`，仅适合单机开发
+- `local`（默认）— 存储到 `public/uploads/`。Docker 部署时该目录挂在 `uploads_data` 卷上并由 nginx 直接对外提供
 - `oss` — 阿里云 OSS，需配置 `OSS_*` 变量
-- `s3` — AWS S3 或兼容服务（MinIO、Cloudflare R2 等），需配置 `S3_*` 变量
 
 ## 常用命令
 

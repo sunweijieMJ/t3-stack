@@ -17,18 +17,29 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # 加载环境变量
-# .env: 应用配置（DATABASE_URL、密钥等）+ HOST_PORT
-# build_info.sh: 镜像版本（APP_IMAGE、NGINX_IMAGE）
-if [ -f ".env" ]; then
-    set -a; source .env; set +a
-fi
+# build_info.sh: 镜像版本（APP_IMAGE、NGINX_IMAGE），供 docker-compose 变量插值使用
 if [ -f "build_info.sh" ]; then
     set -a; source build_info.sh; set +a
 fi
 
+# .env 只取 HOST_PORT，故意不 source 整个文件：
+# source 会让 shell 求值变量内容，密码里一个 $ / 反引号就会被静默改写，
+# 未加引号的 ( 之类还会直接触发语法错误，配合 set -e 让脚本在这里就莫名退出。
+# 容器内的环境变量由 docker-compose 的 env_file 直接读取（不经 shell），
+# 所以这里不需要、也不应该把 .env 导出到脚本环境。
+read_env_value() {
+    local key="$1"
+    [ -f ".env" ] || return 0
+    # 取最后一次赋值（与 env_file 的后者覆盖前者行为一致），去掉首尾引号
+    sed -n "s/^[[:space:]]*${key}=//p" .env | tail -1 | sed -e 's/^["'"'"']//' -e 's/["'"'"']$//'
+}
+
 # 端口默认值必须与 docker-compose.yml 中 ${HOST_PORT:-80} 保持一致，
 # 否则健康检查会去探一个根本没有暴露的端口
-PORT="${HOST_PORT:-80}"
+PORT="$(read_env_value HOST_PORT)"
+PORT="${PORT:-80}"
+# docker-compose.yml 里的 ${HOST_PORT:-80} 靠 shell 环境插值，需要显式导出
+export HOST_PORT="$PORT"
 
 COMPOSE_FILE="docker-compose.yml"
 export COMPOSE_FILE
@@ -196,9 +207,15 @@ update_deploy() {
         log_info "已更新 nginx.conf"
     fi
     if [ -f "$pkg_dir/manage.sh" ]; then
-        cp "$pkg_dir/manage.sh" manage.sh
-        chmod +x manage.sh
-        log_info "已更新 manage.sh"
+        # 必须用「写临时文件 + mv」原子替换，不能直接 cp 覆盖：
+        # 本脚本此刻正在运行，bash 是边读边执行、按文件偏移量取后续命令的。
+        # cp 会原地截断并重写同一个 inode，新旧长度不同时，正在执行的 update 流程
+        # 可能从当前偏移处解析到错位内容，导致部署做到一半崩掉。
+        # mv 走 rename(2)，原 inode 不动，运行中的进程继续读旧内容，安全。
+        cp "$pkg_dir/manage.sh" manage.sh.new
+        chmod +x manage.sh.new
+        mv manage.sh.new manage.sh
+        log_info "已更新 manage.sh（下次执行生效）"
     fi
     if [ -f "$pkg_dir/.env.example" ]; then
         cp "$pkg_dir/.env.example" .env.example
@@ -225,9 +242,13 @@ update_deploy() {
     docker compose up -d --force-recreate || up_ok=false
 
     # 健康检查
-    log_info "等待服务就绪（10s）..."
+    # 容器启动要先跑 node migrate.mjs 再拉起 Next standalone，冷启动可能几十秒。
+    # 这里给的总时长必须 >= docker-compose.yml 里 healthcheck 的 start_period(30s)，
+    # 否则一个其实健康的版本会因为「还没起来」被判失败并触发自动回滚。
+    # 现在：10s + 最多 12 次尝试（间隔 5s）≈ 最长 65s。
+    log_info "等待服务就绪（最长约 65s）..."
     sleep 10
-    if [ "$up_ok" = true ] && health_check 3; then
+    if [ "$up_ok" = true ] && health_check 12; then
         rm -f build_info.sh.bak docker-compose.yml.bak nginx.conf.bak
         log_info "=========================================="
         log_info "更新成功！当前版本: ${COMMIT_HASH:-${APP_IMAGE##*:}}"
@@ -340,9 +361,13 @@ EOF
     docker compose up -d --force-recreate --remove-orphans || up_ok=false
 
     # 健康检查
-    log_info "等待服务就绪（10s）..."
+    # 容器启动要先跑 node migrate.mjs 再拉起 Next standalone，冷启动可能几十秒。
+    # 这里给的总时长必须 >= docker-compose.yml 里 healthcheck 的 start_period(30s)，
+    # 否则一个其实健康的版本会因为「还没起来」被判失败并触发自动回滚。
+    # 现在：10s + 最多 12 次尝试（间隔 5s）≈ 最长 65s。
+    log_info "等待服务就绪（最长约 65s）..."
     sleep 10
-    if [ "$up_ok" = true ] && health_check 3; then
+    if [ "$up_ok" = true ] && health_check 12; then
         rm -f build_info.sh.bak
         log_info "=========================================="
         log_info "部署成功！当前版本: ${app_image##*:}"
