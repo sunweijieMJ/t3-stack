@@ -49,22 +49,57 @@ export const getFrontendConfig = cache(async (): Promise<FrontendConfig> => {
   }
 });
 
-// 后台站点名（admin 顶栏、登录页 logo）。优先 basic.systemTitle，回退到 fallback。
-export async function getSiteName(
-  lang: 'zh-CN' | 'en-US' = 'zh-CN',
-): Promise<string> {
+export type SiteLang = 'zh-CN' | 'en-US';
+
+const SUPPORTED_LANGS = new Set<SiteLang>(['zh-CN', 'en-US']);
+const FALLBACK_LANG: SiteLang = 'zh-CN';
+
+// basic.defaultLanguage 决定所有 i18n 字段（systemTitle / defaultTitle /
+// defaultDescription）按哪种语言取值。此前这个配置项全项目零引用，而各调用点
+// 各自硬编码语言（getSiteName 用 zh-CN、getPortalTitle 用 en-US），
+// 导致后台顶栏和浏览器标题可能显示两种语言。
+export async function getDefaultLang(): Promise<SiteLang> {
   const cfg = await getFrontendConfig();
-  return pickI18nText(cfg.basic?.systemTitle, lang, SITE_NAME_FALLBACK);
+  const raw = cfg.basic?.defaultLanguage;
+  return typeof raw === 'string' && SUPPORTED_LANGS.has(raw as SiteLang)
+    ? (raw as SiteLang)
+    : FALLBACK_LANG;
+}
+
+// HTML lang 属性用的 BCP 47 标签：zh-CN 直接可用，en-US 惯例写 en。
+export function toHtmlLang(lang: SiteLang): string {
+  return lang === 'en-US' ? 'en' : lang;
+}
+
+// OpenGraph locale 用下划线形式。
+export function toOgLocale(lang: SiteLang): string {
+  return lang.replace('-', '_');
+}
+
+// 后台站点名（admin 顶栏、登录页 logo）。优先 basic.systemTitle，回退到 fallback。
+// 不传 lang 时按 basic.defaultLanguage 取。
+export async function getSiteName(lang?: SiteLang): Promise<string> {
+  const [cfg, defaultLang] = await Promise.all([
+    getFrontendConfig(),
+    getDefaultLang(),
+  ]);
+  return pickI18nText(
+    cfg.basic?.systemTitle,
+    lang ?? defaultLang,
+    SITE_NAME_FALLBACK,
+  );
 }
 
 // 门户 SEO 标题。优先 seo.defaultTitle，缺失时回退 basic.systemTitle、再回退 fallback。
-export async function getPortalTitle(
-  lang: 'zh-CN' | 'en-US' = 'en-US',
-): Promise<string> {
-  const cfg = await getFrontendConfig();
+export async function getPortalTitle(lang?: SiteLang): Promise<string> {
+  const [cfg, defaultLang] = await Promise.all([
+    getFrontendConfig(),
+    getDefaultLang(),
+  ]);
+  const l = lang ?? defaultLang;
   return pickI18nText(
     cfg.seo?.defaultTitle,
-    lang,
-    pickI18nText(cfg.basic?.systemTitle, lang, SITE_NAME_FALLBACK),
+    l,
+    pickI18nText(cfg.basic?.systemTitle, l, SITE_NAME_FALLBACK),
   );
 }

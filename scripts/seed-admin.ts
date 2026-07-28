@@ -39,11 +39,16 @@ if (!process.env.BETTER_AUTH_SECRET) {
   process.exit(1);
 }
 
-// 与 src/server/db/index.ts 保持一致的 SSL 行为：RDS 必须开启 SSL，
-// 但项目设计上不强制校验 CA（与生产 db 连接相同）。
-const conn = postgres(process.env.DATABASE_URL, {
-  ssl: { rejectUnauthorized: false },
-});
+// SSL 策略必须与 src/server/db/index.ts、migrate.mjs 三处保持一致
+// （那边有完整说明）：URL 里显式写了 sslmode= 就完全不传 ssl 选项交给
+// postgres.js 处理，否则用 'prefer' —— 支持 TLS 就加密（不校验 CA，兼容自签证书），
+// 不支持就自动降级明文。此前这里硬传 { rejectUnauthorized: false } 强制 TLS，
+// 会让「migrate 通过 → seed 失败 → set -e 退容器」，排查方向被严重误导。
+const sslOption = /[?&]sslmode=/.test(process.env.DATABASE_URL)
+  ? {}
+  : { ssl: 'prefer' as const };
+
+const conn = postgres(process.env.DATABASE_URL, sslOption);
 const db = drizzle(conn, { schema: authSchema });
 
 const auth = betterAuth({

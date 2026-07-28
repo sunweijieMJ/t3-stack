@@ -1,3 +1,4 @@
+import { AntdRegistry } from '@ant-design/nextjs-registry';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/server/better-auth/server';
 import { isAdminEmail } from '@/server/services/admin-check';
@@ -18,9 +19,13 @@ export default async function AdminLayout({
     redirect('/');
   }
 
+  // AntdRegistry 负责在 SSR 阶段收集 antd 的 CSS-in-JS 并通过 useServerInsertedHTML
+  // 注入到 HTML 里。缺了它样式只能等客户端 hydrate 后才生成，admin 首屏会闪一下无样式。
   return (
-    <AdminAntdProvider>
-      <AdminShell>{children}</AdminShell>
-    </AdminAntdProvider>
+    <AntdRegistry>
+      <AdminAntdProvider>
+        <AdminShell>{children}</AdminShell>
+      </AdminAntdProvider>
+    </AntdRegistry>
   );
 }

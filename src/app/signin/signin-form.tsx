@@ -404,16 +404,34 @@ const subtitleMap: Record<string, string> = {
   'email-otp': '使用邮箱验证码登录',
 };
 
+// 站内相对路径白名单：必须单个 / 开头。排除 //host 形式的协议相对 URL，
+// 那会被浏览器当成跨域绝对地址，构成开放重定向。
+// callbackUrl 来自 URL 查询串（攻击者可控），defaultPage 来自后台配置
+// （只有管理员可写），两者都过这道校验。
+function safeInternalPath(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return value.startsWith('/') && !value.startsWith('//') ? value : null;
+}
+
 interface SignInFormProps {
   authMethod: AuthMethod;
   siteName: string;
+  /** basic.defaultPage —— 无 callbackUrl 时的登录后落点，由服务端读配置注入 */
+  defaultPage: string;
 }
 
-function SignInFormInner({ authMethod, siteName }: SignInFormProps) {
+function SignInFormInner({
+  authMethod,
+  siteName,
+  defaultPage,
+}: SignInFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const raw = searchParams.get('callbackUrl') ?? '/';
-  const callbackUrl = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/';
+  // 优先级：callbackUrl（用户本来想去的页面）→ 后台配置的默认页面 → 首页
+  const callbackUrl =
+    safeInternalPath(searchParams.get('callbackUrl')) ??
+    safeInternalPath(defaultPage) ??
+    '/';
 
   const handleSuccess = () => {
     router.push(callbackUrl);

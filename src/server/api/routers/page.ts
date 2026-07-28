@@ -5,14 +5,30 @@ import { z } from 'zod';
 import { frontendConfigSchema } from '@/constants/frontend-config';
 import {
   buildFrontendConfigZod,
+  collectAssetUrls,
   type FrontendConfig,
 } from '@/lib/frontend-config';
 import { systemConfig } from '@/server/db/schema';
 import { FRONTEND_CONFIG_TAG } from '@/server/services/config';
+import { deleteFile } from '@/server/services/storage';
 import { adminProcedure, createTRPCRouter } from '../trpc';
 
 const FRONTEND_CONFIG_KEY = 'frontend';
 const frontendConfigInput = buildFrontendConfigZod(frontendConfigSchema);
+
+/**
+ * 删除「旧配置引用、新配置不再引用」的上传文件。
+ * fire-and-forget：清理失败只会留下一个孤儿文件（等同于改动前的行为），
+ * 不该因此让保存配置这个主流程失败。
+ */
+function purgeOrphanAssets(oldValue: unknown, newValue: unknown): void {
+  const oldUrls = collectAssetUrls(frontendConfigSchema, oldValue);
+  if (oldUrls.size === 0) return;
+  const newUrls = collectAssetUrls(frontendConfigSchema, newValue);
+  for (const url of oldUrls) {
+    if (!newUrls.has(url)) void deleteFile(url);
+  }
+}
 
 export const pageRouter = createTRPCRouter({
   // 读取前端配置：同时返回 updatedAt 作为乐观锁的版本号
@@ -46,6 +62,14 @@ export const pageRouter = createTRPCRouter({
       if (input.expectedUpdatedAt) {
         // 已存在记录：用 WHERE updatedAt=? 做乐观锁
         const expected = new Date(input.expectedUpdatedAt);
+        // 先读旧值：更新之后就拿不到了，而清理孤儿文件需要对比新旧的资源 URL。
+        // 这里的「读后写」是安全的 —— 若期间被他人改过，下面的 UPDATE 会匹配 0 行
+        // 并抛 CONFLICT，purgeOrphanAssets 根本不会执行，不存在误删别人刚传的文件。
+        const [before] = await ctx.db
+          .select({ value: systemConfig.value })
+          .from(systemConfig)
+          .where(eq(systemConfig.key, FRONTEND_CONFIG_KEY))
+          .limit(1);
         const updated = await ctx.db
           .update(systemConfig)
           .set({ value: input.value, updatedAt: now })
@@ -64,6 +88,7 @@ export const pageRouter = createTRPCRouter({
           });
         }
         revalidateTag(FRONTEND_CONFIG_TAG, { expire: 0 });
+        purgeOrphanAssets(before?.value, input.value);
         return { value: input.value, updatedAt: updated[0]?.updatedAt ?? now };
       }
 

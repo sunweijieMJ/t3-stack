@@ -7,6 +7,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   SettingOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { App, Button, Dropdown, Layout, Menu, Tooltip, theme } from 'antd';
@@ -22,6 +23,11 @@ const SITE_NAME_FALLBACK = 'Site';
 const { Sider, Content, Header } = Layout;
 
 const MENU_ITEMS: MenuProps['items'] = [
+  {
+    key: '/admin/users',
+    icon: <TeamOutlined />,
+    label: '用户管理',
+  },
   {
     key: '/admin/audit-logs',
     icon: <HistoryOutlined />,

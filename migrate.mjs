@@ -8,13 +8,13 @@ if (!DATABASE_URL) {
   process.exit(0);
 }
 
-// URL 显式 sslmode=disable 时不走 TLS（本地无 SSL 的 PG）；
-// 其余情况开 SSL 但跳过证书校验（RDS / Aliyun RDS 的自签证书场景）。
-const ssl = /[?&]sslmode=disable\b/.test(DATABASE_URL)
-  ? false
-  : { rejectUnauthorized: false };
+// SSL 策略必须与 src/server/db/index.ts、scripts/seed-admin.ts 三处保持一致
+// （那边有完整说明）：URL 里显式写了 sslmode= 就完全不传 ssl 选项交给
+// postgres.js 处理，否则用 'prefer' —— 支持 TLS 就加密（不校验 CA，兼容自签证书），
+// 不支持就自动降级明文。
+const sslOption = /[?&]sslmode=/.test(DATABASE_URL) ? {} : { ssl: 'prefer' };
 
-const sql = postgres(DATABASE_URL, { max: 1, ssl });
+const sql = postgres(DATABASE_URL, { max: 1, ...sslOption });
 
 try {
   await sql`

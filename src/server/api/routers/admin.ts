@@ -7,6 +7,7 @@ import { adminProcedure, createTRPCRouter } from '@/server/api/trpc';
 import { auth } from '@/server/better-auth';
 import { user } from '@/server/db/auth-schema';
 import { adminAuditLog } from '@/server/db/schema';
+import { isAdminEmail } from '@/server/services/admin-check';
 import {
   getAuditPurgeConfig,
   maybePurgeAuditLogs,
@@ -91,7 +92,7 @@ export const adminRouter = createTRPCRouter({
     }),
 
   listUsers: adminProcedure.query(async ({ ctx }) => {
-    return ctx.db
+    const rows = await ctx.db
       .select({
         id: user.id,
         name: user.name,
@@ -100,6 +101,9 @@ export const adminRouter = createTRPCRouter({
       })
       .from(user)
       .orderBy(desc(user.createdAt));
+    // isAdmin 在服务端逐行算好：isAdminEmail 是 server-only，而且 ADMIN_EMAILS
+    // 白名单本身也不该整份下发给客户端。前端只用它来提示「你正在删除一个管理员账号」。
+    return rows.map((r) => ({ ...r, isAdmin: isAdminEmail(r.email) }));
   }),
 
   deleteUser: adminProcedure

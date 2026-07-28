@@ -13,6 +13,19 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     coverage: {
       provider: 'v8',
+      // 必须显式声明 include，否则 v8 provider 只统计「被测试 import 过」的文件，
+      // 报告会显示 100% 而实际上 90 多个源文件一个都没测 —— 阈值形同虚设。
+      //
+      // 这里只圈定「纯逻辑、不依赖 DB / 网络 / DOM / React」的模块，让 80% 这个数字
+      // 是真的。router、组件、storage / email / config 等需要集成测试或 mock 大量 IO，
+      // 故意不纳入门禁，免得为了凑数写一堆无意义的浅测试。新增纯函数模块请加到这里。
+      include: [
+        'src/lib/auth-error.ts',
+        'src/lib/auth-methods.ts',
+        'src/lib/frontend-config.ts',
+        'src/lib/i18n-text.ts',
+        'src/server/services/get-client-ip.ts',
+      ],
       thresholds: {
         lines: 80,
         functions: 80,

@@ -18,8 +18,12 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# drizzle/ 目录在首次部署前可能不存在，预建空目录避免 RUNNER 阶段 COPY 失败
-RUN mkdir -p drizzle/meta
+# 预建空目录，避免后续阶段 COPY 一个不存在的路径而构建失败：
+#   drizzle/ —— 首次部署、尚未生成任何迁移时不存在
+#   public/  —— 仓库里没有任何静态资源，next build 也不会创建它；
+#               运行时它是 uploads 卷的挂载点（见 docker-compose.yml），
+#               所以必须存在，但内容为空是正常的
+RUN mkdir -p drizzle/meta public
 
 ENV SKIP_ENV_VALIDATION=1
 ENV NEXT_TELEMETRY_DISABLED=1

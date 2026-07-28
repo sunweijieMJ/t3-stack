@@ -15,12 +15,15 @@ export const frontendConfigSchema = {
       defaultPage: {
         type: 'string',
         title: '默认页面',
-        description: '登录后默认跳转的页面路径',
+        description:
+          '登录后默认跳转的页面路径（须以 / 开头）。若登录链接自带 callbackUrl，则以 callbackUrl 优先',
         defaultValue: '/admin',
       },
       defaultLanguage: {
         type: 'string',
         title: '默认语言',
+        description:
+          '决定站点标题、SEO 描述等多语言字段按哪种语言取值，同时决定 html lang 与 og:locale',
         enumType: ['zh-CN', 'en-US'],
         defaultValue: 'zh-CN',
       },

@@ -232,3 +232,58 @@ export function buildFrontendConfigZod(
   }
   return z.object(shape).strict() as z.ZodType<Partial<FrontendConfig>>;
 }
+
+// ==================== 资源 URL 收集 ====================
+
+function collectFromNode(
+  node: JsonSchema,
+  value: unknown,
+  out: Set<string>,
+): void {
+  switch (node.type) {
+    case 'string':
+      if (
+        (node.inputType === 'image' || node.inputType === 'file') &&
+        typeof value === 'string' &&
+        value !== ''
+      ) {
+        out.add(value);
+      }
+      return;
+    case 'array':
+      if (Array.isArray(value)) {
+        for (const item of value) collectFromNode(node.items, item, out);
+      }
+      return;
+    case 'object':
+      if (value !== null && typeof value === 'object') {
+        for (const [k, child] of Object.entries(node.properties)) {
+          collectFromNode(child, (value as Record<string, unknown>)[k], out);
+        }
+      }
+      return;
+    default:
+      return;
+  }
+}
+
+/**
+ * 按 schema 递归收集配置里所有「上传得来的资源 URL」（inputType 为 image / file 的字段）。
+ * 用于保存配置时对比新旧值，把被替换掉的旧文件删掉 —— 否则每换一次 logo
+ * 就在存储里留一份永远不会被引用的孤儿文件。
+ *
+ * 只认 schema 声明为 image / file 的字段：inputType='url' 的外链字段不在此列，
+ * 免得把管理员填的第三方链接当成本系统资源（deleteFile 内部还有一层
+ * uploads/ 前缀校验兜底）。
+ */
+export function collectAssetUrls(
+  schema: FrontendSchema,
+  value: unknown,
+): Set<string> {
+  const out = new Set<string>();
+  if (value === null || typeof value !== 'object') return out;
+  for (const [k, node] of Object.entries(schema)) {
+    collectFromNode(node, (value as Record<string, unknown>)[k], out);
+  }
+  return out;
+}

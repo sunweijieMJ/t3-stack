@@ -6,8 +6,15 @@ import { env } from '@/env';
 /**
  * 上传文件到配置的存储后端（local / OSS）。
  * 返回文件的公开访问 URL。
+ *
  * downloadName 为 PDF 等需要"下载而非内联打开"的场景指定，会被写入
  * Content-Disposition: attachment header，让浏览器走下载流程而不是直接渲染。
+ *
+ * 注意：downloadName 只对 oss 分支有意义。local 分支下文件是被 nginx（生产）或
+ * Next 的静态服务（dev）直接吐出来的，这里根本没有机会写响应头，所以
+ * uploadToLocal 不接收该参数 —— 强制下载由 nginx.conf 里 /uploads/ 下的
+ * `location ~* \.pdf$` 补 Content-Disposition 实现。
+ * 唯一的缺口是 `next dev`（不经 nginx），本地开发时 PDF 仍会内联打开。
  */
 export async function uploadFile(
   module: string,

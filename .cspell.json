@@ -17,6 +17,8 @@
     "OOM",
     "SSG",
     "TOCTOU",
+    "BCP",
+    "frameloop",
     "rsc",
     "fmt",
     "vnd",

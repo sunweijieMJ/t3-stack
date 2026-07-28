@@ -18,8 +18,6 @@ export default {
     // 影响范围：UnoCSS 工具类输出 rem，本就不受该插件（unitToConvert: 'px'）影响，
     // 所以登录页与 admin 渲染不变；1920 宽度下门户渲染也完全不变
     // （原 0.833vw @1920 == 16px，现在就是 16px）。
-    // devDependencies 里的 postcss-px-to-viewport-8-plugin 已无引用，可执行
-    //   pnpm remove postcss-px-to-viewport-8-plugin
-    // 单独清理（会改动 pnpm-lock.yaml，故未与本次功能改动混在一起）。
+    // 依赖已从 devDependencies 移除，此处保留说明仅为记录该决策的理由。
   ],
 };

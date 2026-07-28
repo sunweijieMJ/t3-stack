@@ -35,6 +35,14 @@
   opacity: 0.85;
 }
 
+// header 高度 60px，logo 图按行高限死，避免管理员传了大图把顶栏撑开
+.logoImg {
+  display: block;
+  width: auto;
+  height: 24px;
+  object-fit: contain;
+}
+
 .menu {
   display: flex;
   align-items: center;

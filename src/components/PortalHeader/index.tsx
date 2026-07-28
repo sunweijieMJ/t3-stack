@@ -10,7 +10,14 @@ const UTILITY_LINKS: { label: string; href: string }[] = [];
 // 与 index.module.scss 中 .header 的 height 保持一致
 const HEADER_H = 60;
 
-export function PortalHeader() {
+interface PortalHeaderProps {
+  /** 站点名，来自 basic.systemTitle（由 portal layout 在服务端解析后注入） */
+  siteName: string;
+  /** 站点 Logo，来自 basic.logoImage；未配置时退化为纯文字站点名 */
+  logoImage?: string;
+}
+
+export function PortalHeader({ siteName, logoImage }: PortalHeaderProps) {
   const { layoutVisible } = usePortalLayout();
   // 区块用 data-portal-theme 声明自身明暗，header 据此反色（透明浮在内容上）。
   // 未声明的页面沿用 dark（白字），与深色首屏一致。
@@ -56,7 +63,13 @@ export function PortalHeader() {
     <div
       className={`${styles.header} ${tone === 'light' ? styles.headerLight : ''}`}
     >
-      <span className={styles.logo}>Site</span>
+      <span className={styles.logo}>
+        {logoImage ? (
+          <img alt={siteName} className={styles.logoImg} src={logoImage} />
+        ) : (
+          siteName
+        )}
+      </span>
       <div className={styles.menu}>
         {UTILITY_LINKS.map((link) => (
           <Link className={styles.link} href={link.href} key={link.label}>

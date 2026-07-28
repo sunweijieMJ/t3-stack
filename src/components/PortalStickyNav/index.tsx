@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { PortalNav } from '@/components/PortalNav';
 import styles from './index.module.scss';
 
-export function PortalStickyNav() {
+export function PortalStickyNav({ siteName }: { siteName: string }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const lastScrollY = useRef(0);
   const isVisible = useRef(false);
@@ -70,7 +70,7 @@ export function PortalStickyNav() {
 
   return (
     <div className={styles.wrapper} ref={wrapperRef}>
-      <PortalNav />
+      <PortalNav siteName={siteName} />
     </div>
   );
 }

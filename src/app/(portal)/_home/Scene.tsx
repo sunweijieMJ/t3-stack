@@ -3,7 +3,7 @@
 import { Float, Icosahedron, Sparkles, Torus } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useReducedMotion } from 'framer-motion';
-import { Suspense, useRef } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import type { Group, Mesh } from 'three';
 
 const GREEN = '#00a852';
@@ -109,13 +109,33 @@ function ParallaxCamera({ still }: { still: boolean }) {
 
 export default function Scene() {
   const still = useReducedMotion() ?? false;
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  // KV 只占首屏一块，而首页很长。默认的 frameloop='always' 会在用户滚到页面
+  // 底部之后仍然逐帧渲染 WebGL，纯属白烧电。用 IntersectionObserver 盯住 canvas
+  // 本身，离开视口就切到 'demand'（只在 invalidate 时渲染，等于停机）。
+  const [inView, setInView] = useState(true);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => setInView(entry?.isIntersecting ?? false),
+      { threshold: 0 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   return (
     <Canvas
       camera={{ position: [0, 0, 6.4], fov: 42 }}
       // 上限压到 1.75：高分屏下 2x 对这个几乎全是线条的场景收益有限
       dpr={[1, 1.75]}
+      // reduced-motion 下所有 useFrame 都直接 return、画面是静止的，
+      // 没有理由继续跑渲染循环；'demand' 会在挂载时渲染一帧后停住。
+      frameloop={still || !inView ? 'demand' : 'always'}
       gl={{ antialias: true, alpha: true }}
+      ref={canvasRef}
     >
       <Suspense fallback={null}>
         <fog args={[INK, 6, 15]} attach="fog" />
