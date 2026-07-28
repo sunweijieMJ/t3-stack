@@ -1,0 +1,239 @@
+# 自建服务器部署（Docker 镜像 → GHCR → SSH）。
+# Vercel 部署不走这里，由 Vercel 自己监听推送，见 README 的「部署到 Vercel」。
+#
+# 触发方式刻意设计为「不自动」：
+#   1. 推送 v* tag（发版）
+#   2. 手动 workflow_dispatch
+# 参考实现用 workflow_run 在每次 Check Quality 成功后自动部署，这里不沿用 ——
+# 本仓库的主部署目标已是 Vercel，没有配服务器 secrets 的人每次推送都会收到一条
+# 失败通知，久了就没人看 CI 了。需要恢复自动部署的话，取消下面 workflow_run 的注释。
+#
+# 需要的 secrets（Settings → Secrets and variables → Actions）:
+#   DEPLOY_SERVER_HOST       服务器 IP 或域名
+#   DEPLOY_SERVER_USER       SSH 用户名
+#   DEPLOY_SERVER_PATH       部署目标路径（该目录下需已有 .env）
+#   DEPLOY_SSH_PRIVATE_KEY   SSH 私钥（完整内容，含 BEGIN/END 行）
+# 未配齐时 deploy job 会自动跳过（不是失败），build job 仍会把镜像推到 GHCR。
+#
+# 本项目没有任何 NEXT_PUBLIC_* 构建期变量（env.js 的 client 段为空），
+# 所有配置都是运行时读取，因此镜像与环境无关：同一个 tag 可以直接在多环境复用，
+# 也不需要参考实现里那套 build-args。
+
+name: Build and Deploy
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: '构建后是否部署到服务器'
+        required: true
+        default: true
+        type: boolean
+  # workflow_run:
+  #   workflows: ["Check Quality"]
+  #   branches: [main, master]
+  #   types: [completed]
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_name: ${{ steps.repo.outputs.image_name }}
+      git_hash: ${{ steps.info.outputs.git_hash }}
+      build_time: ${{ steps.info.outputs.build_time }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # github.repository 可能含大写（如 sunweijieMJ/t3-stack），
+      # 而 Docker 镜像名必须全小写，这里统一转换。
+      - name: Normalize image name
+        id: repo
+        run: echo "image_name=${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+
+      - name: Generate build info
+        id: info
+        run: |
+          echo "git_hash=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Extract app metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.repo.outputs.image_name }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push (app)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          target: runner
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract nginx metadata
+        id: nginx-meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.repo.outputs.image_name }}-nginx
+          tags: |
+            type=sha,prefix=
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # nginx 镜像内含 nginx.conf 与从 builder 拷来的 _next/static，
+      # 必须与 app 镜像同源构建，不能用官方 nginx:alpine 顶替。
+      - name: Build and push (nginx)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          target: nginx
+          tags: ${{ steps.nginx-meta.outputs.tags }}
+          labels: ${{ steps.nginx-meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # secrets 上下文在 job 级 if 里不可靠，因此单独用一个 job 把「是否配齐」
+  # 降级成普通 output，供 deploy job 的 if 判断。
+  preflight:
+    name: Check deploy secrets
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      can_deploy: ${{ steps.check.outputs.can_deploy }}
+    steps:
+      - id: check
+        # 变量名不用 USER：runner 上已存在同名系统变量，覆盖它容易在排查时误导。
+        run: |
+          if [[ -n "$SSH_HOST" && -n "$SSH_USER" && -n "$SSH_PATH" && -n "$SSH_KEY" ]]; then
+            echo "can_deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "can_deploy=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::未配齐服务器部署 secrets，已跳过 deploy（镜像仍已推送到 GHCR）"
+          fi
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_SERVER_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_SERVER_USER }}
+          SSH_PATH: ${{ secrets.DEPLOY_SERVER_PATH }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+
+  deploy:
+    name: Deploy
+    needs: [build, preflight]
+    runs-on: ubuntu-latest
+    # GITHUB_TOKEN 会被带到服务器上做 docker login 拉 GHCR 镜像，需要 packages:read
+    permissions:
+      contents: read
+      packages: read
+    if: |
+      needs.preflight.outputs.can_deploy == 'true' &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.deploy == 'true')
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    environment:
+      name: production
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # .env 不在同步列表里：生产配置由运维手动管理，覆盖会直接丢掉线上密钥。
+      - name: Sync deploy files
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_SERVER_HOST }}
+          username: ${{ secrets.DEPLOY_SERVER_USER }}
+          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          source: 'manage.sh,docker-compose.yml,nginx.conf,.env.example'
+          target: ${{ secrets.DEPLOY_SERVER_PATH }}
+          overwrite: true
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_SERVER_HOST }}
+          username: ${{ secrets.DEPLOY_SERVER_USER }}
+          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          # 从 GHCR 拉镜像可能较慢，默认 10m 会在拉取中途被掐断。
+          command_timeout: 30m
+          envs: REGISTRY,IMAGE_NAME,GIT_HASH,DEPLOY_PATH,GHCR_USER,GHCR_TOKEN
+          script: |
+            set -e
+            cd "${DEPLOY_PATH}"
+            chmod +x ./manage.sh
+            echo "${GHCR_TOKEN}" | docker login "${REGISTRY}" -u "${GHCR_USER}" --password-stdin
+            # manage.sh 负责 docker pull、重建容器、健康检查与失败回滚
+            ./manage.sh pull-deploy \
+              "${REGISTRY}/${IMAGE_NAME}:${GIT_HASH}" \
+              "${REGISTRY}/${IMAGE_NAME}-nginx:${GIT_HASH}"
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ needs.build.outputs.image_name }}
+          GIT_HASH: ${{ needs.build.outputs.git_hash }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_SERVER_PATH }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  summary:
+    name: Summary
+    needs: [build, preflight, deploy]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: |
+          {
+            echo "# 部署结果"
+            echo ""
+            echo "| 阶段 | 状态 |"
+            echo "|------|------|"
+            echo "| 构建 & 推送 | ${{ needs.build.result }} |"
+            echo "| 部署 | ${{ needs.deploy.result }} |"
+            echo ""
+            if [[ "${{ needs.build.result }}" == "success" ]]; then
+              echo "**镜像**: \`${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ needs.build.outputs.git_hash }}\`"
+              echo "**构建时间**: ${{ needs.build.outputs.build_time }}"
+            fi
+            if [[ "${{ needs.preflight.outputs.can_deploy }}" != "true" ]]; then
+              echo ""
+              echo "> 未配置服务器部署 secrets，已跳过部署。镜像可直接从 GHCR 拉取。"
+            fi
+            if [[ "${{ needs.deploy.result }}" == "failure" ]]; then
+              echo ""
+              echo "> **部署失败** — 请查看 Deploy job 日志。服务器端 manage.sh 在健康检查失败时会自动回滚到上一版本。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

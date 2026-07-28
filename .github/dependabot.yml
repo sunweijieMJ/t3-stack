@@ -1,0 +1,77 @@
+# 分组规则按「同一生态必须同版本升级」来划，而不是按热度。
+# 拆开升级会立刻炸的组合（如 @trpc/server 与 @trpc/client、three 与 @types/three）
+# 都放进同一个 group，避免出现一半新一半旧的中间态 PR。
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      react:
+        patterns:
+          - 'react'
+          - 'react-dom'
+          - '@types/react'
+          - '@types/react-dom'
+      nextjs:
+        patterns:
+          - 'next'
+          - '@next/*'
+      trpc:
+        patterns:
+          - '@trpc/*'
+          - '@tanstack/react-query'
+      drizzle:
+        patterns:
+          - 'drizzle-orm'
+          - 'drizzle-kit'
+          - 'postgres'
+      # antd 与 @ant-design/* 是同一套设计体系，registry 与 icons 会跟着主包走
+      antd:
+        patterns:
+          - 'antd'
+          - '@ant-design/*'
+      # better-auth 主包与其 adapter/plugin 的内部协议耦合很紧
+      auth:
+        patterns:
+          - 'better-auth'
+      # three 与 @types/three、R3F 全家桶必须同步，否则类型与运行时会对不上
+      three:
+        patterns:
+          - 'three'
+          - '@types/three'
+          - '@react-three/*'
+      biome:
+        patterns:
+          - '@biomejs/*'
+      unocss:
+        patterns:
+          - 'unocss'
+          - '@unocss/*'
+      vitest:
+        patterns:
+          - 'vitest'
+          - '@vitest/*'
+      playwright:
+        patterns:
+          - '@playwright/*'
+      commitlint:
+        patterns:
+          - '@commitlint/*'
+          - 'cz-git'
+          - 'czg'
+    ignore:
+      # Node 类型必须跟着 .nvmrc 的 22 走，@types/node 25.x 已对应 Node 25，
+      # 让它自由跳大版本会引入当前运行时并不存在的 API 类型。
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5

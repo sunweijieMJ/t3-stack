@@ -1,0 +1,71 @@
+# 质量门禁：与本地 pre-commit 钩子跑的是同一套命令，保证「本地过 = CI 过」。
+#
+# 不起 Postgres service（参考实现起了，这里刻意去掉）：
+#   - pnpm test 全是纯逻辑单测，唯一碰到服务端模块的 audit-action-labels 只做路由
+#     自省，postgres.js 是惰性建连，整个过程不发起任何连接；
+#   - pnpm build 期间 getFrontendConfig() 连不上库会 catch 并降级为默认配置
+#     （见 server/services/config.ts，且刻意不缓存降级结果），构建照常成功。
+#   起一个用不到的数据库只是每次多花约 15s 拉镜像 + 等健康检查。
+name: Check Quality
+
+on:
+  push:
+    branches: [main, master, 'release/**']
+  pull_request:
+    branches: [main, master, 'release/**']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # lint / type-check / spell-check / test 合并成一个 job：四者加起来不到 20s，
+  # 拆成四个 job 反而要付四次 checkout + install 的固定开销。
+  quality:
+    name: Lint / Types / Spell / Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint (Biome)
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm type-check
+        # 单测已用 vitest.config.ts 里的 env 设了 SKIP_ENV_VALIDATION，
+        # type-check 走 tsc 不加载 env.js，但显式声明一次更省心。
+        env:
+          SKIP_ENV_VALIDATION: 1
+
+      - name: Spell check
+        run: pnpm spell-check
+
+      # 用 test:coverage 而非 test：vitest.config.ts 里配了 80% 的覆盖率阈值，
+      # 只跑 pnpm test 会让这道门禁在 CI 上形同虚设。
+      - name: Unit tests (with coverage gate)
+        run: pnpm test:coverage
+
+  # 构建单独成 job，与上面并行 —— 它约 65s，是关键路径。
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    env:
+      SKIP_ENV_VALIDATION: 1
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
