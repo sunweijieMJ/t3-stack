@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { and, eq } from 'drizzle-orm';
 import { revalidateTag } from 'next/cache';
+import { after } from 'next/server';
 import { z } from 'zod';
 import { frontendConfigSchema } from '@/constants/frontend-config';
 import {
@@ -20,16 +21,19 @@ const frontendConfigInput = buildFrontendConfigZod(frontendConfigSchema);
 
 /**
  * 删除「旧配置引用、新配置不再引用」的上传文件。
- * fire-and-forget：清理失败只会留下一个孤儿文件（等同于改动前的行为），
+ * 不 await：清理失败只会留下一个孤儿文件（等同于改动前的行为），
  * 不该因此让保存配置这个主流程失败。
+ *
+ * 但要用 after() 保活：Serverless 下响应返回后实例即冻结，裸 void 的删除请求会被
+ * 丢弃，每换一次 logo 就在 OSS 里永久留一份没人引用的文件。standalone 下行为不变。
  */
 function purgeOrphanAssets(oldValue: unknown, newValue: unknown): void {
   const oldUrls = collectAssetUrls(frontendConfigSchema, oldValue);
   if (oldUrls.size === 0) return;
   const newUrls = collectAssetUrls(frontendConfigSchema, newValue);
-  for (const url of oldUrls) {
-    if (!newUrls.has(url)) void deleteFile(url);
-  }
+  const stale = [...oldUrls].filter((url) => !newUrls.has(url));
+  if (stale.length === 0) return;
+  after(Promise.all(stale.map((url) => deleteFile(url))));
 }
 
 export const pageRouter = createTRPCRouter({

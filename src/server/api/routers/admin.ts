@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, gte, ilike, lt, lte, min } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
+import { after } from 'next/server';
 import { z } from 'zod';
 import { ACTION_LABELS } from '@/server/api/audit-action-labels';
 import { adminProcedure, createTRPCRouter } from '@/server/api/trpc';
@@ -193,7 +194,9 @@ export const adminRouter = createTRPCRouter({
 
   // 日志统计（总数 + 最早记录时间）；顺手触发懒清理（24h 频次保护，失败已被 service 自吞）
   getAuditLogStats: adminProcedure.query(async ({ ctx }) => {
-    void maybePurgeAuditLogs();
+    // after() 而非裸 void：Serverless 下响应返回即冻结实例，未保活的清理任务会被
+    // 丢弃，自动清理将永远不生效（且无任何报错）。standalone 下行为不变。
+    after(maybePurgeAuditLogs());
     const [countResult, minResult] = await Promise.all([
       ctx.db.select({ total: count() }).from(adminAuditLog),
       ctx.db

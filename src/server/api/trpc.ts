@@ -8,6 +8,7 @@
  */
 
 import { initTRPC, TRPCError } from '@trpc/server';
+import { after } from 'next/server';
 import superjson from 'superjson';
 import { ZodError } from 'zod';
 
@@ -143,9 +144,8 @@ function sanitizeInput(input: unknown): unknown {
  * result='error' + errorMessage='Admin access required'。安全审计最需要的
  * 恰恰是这类被拒记录；挂在校验之后会导致越权尝试一条都不留痕。
  *
- * 设计：写入采用 fire-and-forget（不 await），让业务响应不被 DB I/O 阻塞。
- * Standalone 长进程下，Node 事件循环会自然 flush 写入；如果未来迁移到 serverless
- * 需要响应后保活异步任务，请改用 next/server 的 after() 包裹 writeLog。
+ * 设计：写入不 await，让业务响应不被 DB I/O 阻塞，但必须用 next/server 的 after()
+ * 包裹 —— 见 writeLog 处的说明。
  *
  * 日志清理（保留窗口）已从此中间件移除：原先每条 mutation 都额外查 systemConfig
  * 3 个 key，吞性能。改为按需在 getAuditLogStats / setAuditPurgeConfig 入口触发。
@@ -165,10 +165,16 @@ const auditMiddleware = t.middleware(
     const ua = ctx.headers.get('user-agent') ?? null;
 
     const writeLog = (values: typeof adminAuditLog.$inferInsert) => {
-      void db
-        .insert(adminAuditLog)
-        .values(values)
-        .catch((err) => console.error('[AuditLog] 写入失败:', err));
+      // 必须走 after() 而不是裸 void：Serverless（Vercel）在响应写回后会立即冻结
+      // 甚至回收实例，未被保活的 Promise 会被直接丢弃 —— 表现为审计日志随机缺条，
+      // 而审计恰恰是最不能丢的数据，且这种丢失不会有任何报错。
+      // after() 让 Next 把回调保活到响应之后再 flush；standalone 长进程下行为不变。
+      after(
+        db
+          .insert(adminAuditLog)
+          .values(values)
+          .catch((err) => console.error('[AuditLog] 写入失败:', err)),
+      );
     };
 
     try {
