@@ -3,7 +3,7 @@
   "version": "0.2",
   "language": "en",
   "minWordLength": 3,
-  "files": ["src/**/*.{js,ts,jsx,tsx,vue}"],
+  "files": ["src/**/*.{js,ts,jsx,tsx,vue}", "tests/**/*.ts", "e2e/**/*.ts"],
   "dictionaries": [
     "typescript",
     "node",

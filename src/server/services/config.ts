@@ -3,11 +3,13 @@ import { eq } from 'drizzle-orm';
 import { unstable_cache } from 'next/cache';
 import { cache } from 'react';
 import { type FrontendConfig, mergeConfig } from '@/lib/frontend-config';
-import { pickI18nText } from '@/lib/i18n-text';
+import { pickI18nText, resolveSiteLang, type SiteLang } from '@/lib/i18n-text';
 import { db } from '@/server/db';
 import { systemConfig } from '@/server/db/schema';
 
-const FRONTEND_CONFIG_KEY = 'frontend';
+// systemConfig 表里存放门户配置的行主键。读（本文件）与写（api/routers/page）
+// 必须用同一个常量：各自硬编码字符串时，改一处漏一处会变成「存进去了但读不到」的静默故障。
+export const FRONTEND_CONFIG_KEY = 'frontend';
 const SITE_NAME_FALLBACK = 'Site';
 // 跨请求缓存 tag —— admin 保存配置时通过 revalidateTag(FRONTEND_CONFIG_TAG) 立即失效
 export const FRONTEND_CONFIG_TAG = 'frontend-config';
@@ -49,10 +51,9 @@ export const getFrontendConfig = cache(async (): Promise<FrontendConfig> => {
   }
 });
 
-export type SiteLang = 'zh-CN' | 'en-US';
-
-const SUPPORTED_LANGS = new Set<SiteLang>(['zh-CN', 'en-US']);
-const FALLBACK_LANG: SiteLang = 'zh-CN';
+// 取值规则本身放在 lib/i18n-text（零依赖纯逻辑），以便客户端组件也能共用同一份判断；
+// 本文件带 server-only，客户端 import 不进来。
+export type { SiteLang };
 
 // basic.defaultLanguage 决定所有 i18n 字段（systemTitle / defaultTitle /
 // defaultDescription）按哪种语言取值。此前这个配置项全项目零引用，而各调用点
@@ -60,10 +61,7 @@ const FALLBACK_LANG: SiteLang = 'zh-CN';
 // 导致后台顶栏和浏览器标题可能显示两种语言。
 export async function getDefaultLang(): Promise<SiteLang> {
   const cfg = await getFrontendConfig();
-  const raw = cfg.basic?.defaultLanguage;
-  return typeof raw === 'string' && SUPPORTED_LANGS.has(raw as SiteLang)
-    ? (raw as SiteLang)
-    : FALLBACK_LANG;
+  return resolveSiteLang(cfg.basic?.defaultLanguage);
 }
 
 // HTML lang 属性用的 BCP 47 标签：zh-CN 直接可用，en-US 惯例写 en。

@@ -61,14 +61,19 @@ RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-
-# 预创建 uploads 目录，确保 volume 挂载后权限正确
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres ./node_modules/postgres
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
 COPY --from=builder --chown=nextjs:nodejs /app/migrate.mjs ./migrate.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/seed-admin.mjs ./seed-admin.mjs
+
+# 必须预创建 public/uploads 并归属 nextjs（放在所有 COPY 之后，避免属主被覆盖）：
+# docker-compose 把 uploads_data 卷挂在 /app/public/uploads 上。若镜像里该路径不存在，
+# Docker 会以 root:root 创建挂载点，而容器以 USER nextjs(uid 1001) 运行 ——
+# STORAGE_PROVIDER=local（默认值）时 storage.ts 的 writeFile 会直接 EACCES，
+# 表现为上传恒返回「上传失败，请重试」。路径已存在时卷会继承它的属主，权限才正确。
+RUN mkdir -p ./public/uploads && chown -R nextjs:nodejs ./public
 
 USER nextjs
 

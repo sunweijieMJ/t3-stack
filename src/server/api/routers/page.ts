@@ -9,11 +9,13 @@ import {
   type FrontendConfig,
 } from '@/lib/frontend-config';
 import { systemConfig } from '@/server/db/schema';
-import { FRONTEND_CONFIG_TAG } from '@/server/services/config';
+import {
+  FRONTEND_CONFIG_KEY,
+  FRONTEND_CONFIG_TAG,
+} from '@/server/services/config';
 import { deleteFile } from '@/server/services/storage';
 import { adminProcedure, createTRPCRouter } from '../trpc';
 
-const FRONTEND_CONFIG_KEY = 'frontend';
 const frontendConfigInput = buildFrontendConfigZod(frontendConfigSchema);
 
 /**

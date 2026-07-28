@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickI18nText } from '@/lib/i18n-text';
+import { FALLBACK_LANG, pickI18nText, resolveSiteLang } from '@/lib/i18n-text';
 
 describe('pickI18nText', () => {
   it('纯字符串直接返回', () => {
@@ -48,5 +48,21 @@ describe('pickI18nText', () => {
 
   it('未显式传 lang 时默认按 zh-CN 取', () => {
     expect(pickI18nText({ 'zh-CN': '中文', 'en-US': 'English' })).toBe('中文');
+  });
+});
+
+describe('resolveSiteLang', () => {
+  it('放行受支持的语言', () => {
+    expect(resolveSiteLang('zh-CN')).toBe('zh-CN');
+    expect(resolveSiteLang('en-US')).toBe('en-US');
+  });
+
+  it('未支持 / 非字符串 / 空值一律回退 zh-CN', () => {
+    expect(resolveSiteLang('ja-JP')).toBe(FALLBACK_LANG);
+    expect(resolveSiteLang('')).toBe(FALLBACK_LANG);
+    expect(resolveSiteLang(undefined)).toBe(FALLBACK_LANG);
+    expect(resolveSiteLang(null)).toBe(FALLBACK_LANG);
+    expect(resolveSiteLang(123)).toBe(FALLBACK_LANG);
+    expect(resolveSiteLang({ 'zh-CN': 'x' })).toBe(FALLBACK_LANG);
   });
 });

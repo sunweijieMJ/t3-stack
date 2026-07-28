@@ -16,7 +16,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useFrontendConfig } from '@/hooks/useFrontendConfig';
 import { authClient } from '@/lib/auth-client';
-import { pickI18nText } from '@/lib/i18n-text';
+import { pickI18nText, resolveSiteLang } from '@/lib/i18n-text';
 
 const SITE_NAME_FALLBACK = 'Site';
 
@@ -47,9 +47,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const { data: session } = authClient.useSession();
   const frontendConfig = useFrontendConfig();
+  // 语言必须跟随 basic.defaultLanguage，不能硬编码 'zh-CN'：否则配成 en-US 时
+  // 浏览器标题（走服务端 getDefaultLang）是英文、侧边栏却仍是中文。
+  // 这里从同一份响应式配置里取，保存设置后无需刷新即可同步。
   const siteName = pickI18nText(
     frontendConfig.basic?.systemTitle,
-    'zh-CN',
+    resolveSiteLang(frontendConfig.basic?.defaultLanguage),
     SITE_NAME_FALLBACK,
   );
   const {

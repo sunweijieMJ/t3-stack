@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isSafeInternalPath } from '@/lib/safe-path';
 
 // 原生深合并，替代 lodash-es/merge
 function deepMerge<T extends Record<string, any>>(
@@ -161,12 +162,6 @@ function isSafeHttpUrl(value: string): boolean {
   }
 }
 
-// 站内相对路径：单个 / 开头。排除 //host 形式的协议相对 URL，
-// 那会被浏览器解析成跨域绝对地址。
-function isSiteRelativePath(value: string): boolean {
-  return value.startsWith('/') && !value.startsWith('//');
-}
-
 // inputType='url'：外链字段，必须是完整的 http(s) 链接（空串表示未配置）。
 const externalUrlSchema = z
   .string()
@@ -180,7 +175,7 @@ const externalUrlSchema = z
 const assetUrlSchema = z
   .string()
   .max(MAX_URL_LEN)
-  .refine((v) => v === '' || isSiteRelativePath(v) || isSafeHttpUrl(v), {
+  .refine((v) => v === '' || isSafeInternalPath(v) || isSafeHttpUrl(v), {
     message: '必须是站内路径（/ 开头）或 http(s) 链接',
   });
 

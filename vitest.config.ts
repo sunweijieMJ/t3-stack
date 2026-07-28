@@ -24,6 +24,7 @@ export default defineConfig({
         'src/lib/auth-methods.ts',
         'src/lib/frontend-config.ts',
         'src/lib/i18n-text.ts',
+        'src/lib/safe-path.ts',
         'src/server/services/get-client-ip.ts',
       ],
       thresholds: {

@@ -136,4 +136,16 @@ if (typeof window === 'undefined' && !process.env.SKIP_ENV_VALIDATION) {
       `❌ 环境变量校验失败，以下变量在当前配置下必填:\n  - ${missing.join('\n  - ')}`,
     );
   }
+
+  // 不抛错只告警：Next 进程直接暴露公网时 false 才是正确值，无法在这里判断拓扑。
+  // 但本仓库自带的 compose + nginx 拓扑下 false 是个静默陷阱 —— getClientIp 恒返回
+  // 'unknown'，于是全站 /api/* 共享同一个限流桶（默认 60 次/分钟），
+  // 且审计日志的 ip_address 恒为 NULL。默认值保持 false 是出于安全考虑（宁可误伤
+  // 也不能让人伪造 IP 绕过限流），代价是部署到代理后必须显式打开。
+  if (env.NODE_ENV === 'production' && !env.TRUST_PROXY_HEADERS) {
+    console.warn(
+      '⚠️  TRUST_PROXY_HEADERS=false：所有 /api/* 请求将共享同一个限流桶，' +
+        '审计日志也记不到真实 IP。若本服务位于 nginx / CDN 等受信代理之后，请设为 true。',
+    );
+  }
 }
