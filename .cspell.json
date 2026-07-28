@@ -140,7 +140,13 @@
     "rediss",
     "pincode",
     "verif",
-    "ication"
+    "ication",
+    "drei",
+    "clearcoat",
+    "metalness",
+    "emissive",
+    "fov",
+    "dpr"
   ],
   "patterns": [
     {

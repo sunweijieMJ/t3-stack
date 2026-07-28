@@ -1,78 +1,239 @@
 'use client';
 
-import { motion } from 'framer-motion';
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+  useScroll,
+  useTransform,
+} from 'framer-motion';
 import dynamic from 'next/dynamic';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChapterFigure } from './ChapterFigure';
+import { CubeButton } from './CubeButton';
+import {
+  CHAPTERS,
+  type Chapter,
+  NEWS,
+  QUICK_LINKS,
+  STATS,
+  type Stat,
+  SWITCH_SCENES,
+  VOICES,
+} from './data';
 import styles from './index.module.scss';
+import { SceneRail } from './SceneRail';
+import { FadeLines, SplitText } from './SplitText';
 
 // 3D 场景仅在客户端加载（Three.js 依赖 WebGL，禁用 SSR），
-// 加载前用 CSS 渐变兜底，避免首屏空白。
+// 加载前由 KV 自身的深色底兜底，避免首屏空白。
 const Scene = dynamic(() => import('./Scene'), {
   ssr: false,
   loading: () => null,
 });
 
-// ==================== 门户数据（骨架示例，后续可接后台配置） ====================
+const EASE = [0.3, 0.26, 0.38, 1] as const;
 
-const STATS = [
-  { value: 1921, suffix: '', label: '建校年份' },
-  { value: 32, suffix: '个', label: '学院与学部' },
-  { value: 48000, suffix: '+', label: '在校师生' },
-  { value: 156, suffix: '个', label: '重点学科' },
-];
+// ==================== 通用区块标题 ====================
 
-const SCHOOLS = [
-  {
-    name: '信息科学与技术学院',
-    en: 'Information Science & Technology',
-    icon: '◈',
-  },
-  { name: '经济与管理学院', en: 'Economics & Management', icon: '◇' },
-  { name: '人文社会科学学院', en: 'Humanities & Social Sciences', icon: '❖' },
-  { name: '生命科学学院', en: 'Life Sciences', icon: '✦' },
-  { name: '材料与化学工程学院', en: 'Materials & Chemical Eng.', icon: '⬡' },
-  { name: '医学院', en: 'School of Medicine', icon: '✚' },
-];
+/** ( Section / Name ) 形式的括号小标签 */
+function Label({ children, tone }: { children: string; tone?: 'light' }) {
+  return (
+    <motion.span
+      className={`${styles.label} ${tone === 'light' ? styles.labelLight : ''}`}
+      initial={{ opacity: 0 }}
+      transition={{ duration: 0.6, ease: EASE }}
+      viewport={{ once: true, amount: 0.8 }}
+      whileInView={{ opacity: 1 }}
+    >
+      <span className={styles.labelBracket}>(</span>
+      {children}
+      <span className={styles.labelBracket}>)</span>
+    </motion.span>
+  );
+}
 
-const NEWS = [
-  {
-    tag: '科研',
-    date: '2026-07-18',
-    title: '我校科研团队在量子计算领域取得突破性进展，成果登上顶级期刊',
-  },
-  {
-    tag: '招生',
-    date: '2026-07-15',
-    title: '2026 年本科招生录取工作全面启动，新增三个交叉学科专业',
-  },
-  {
-    tag: '合作',
-    date: '2026-07-10',
-    title: '学校与多家龙头企业共建产学研创新联合体，推动成果转化',
-  },
-  {
-    tag: '校园',
-    date: '2026-07-05',
-    title: '2026 年毕业典礼隆重举行，逾万名学子踏上人生新征程',
-  },
-];
+// ==================== KV ====================
 
-const QUICK_LINKS = [
-  { label: '本科招生', icon: '🎓' },
-  { label: '研究生院', icon: '📚' },
-  { label: '科学研究', icon: '🔬' },
-  { label: '国际交流', icon: '🌐' },
-  { label: '图书馆', icon: '📖' },
-  { label: '就业服务', icon: '💼' },
-];
+function KeyVisual() {
+  return (
+    <section className={styles.kv} data-portal-theme="dark">
+      <div className={styles.kvCanvas}>
+        <Scene />
+      </div>
+      <div className={styles.kvVeil} />
 
-// ==================== 数字滚动动画 Hook ====================
+      <div className={styles.kvInner}>
+        <div className={styles.kvKeywords}>
+          <motion.span
+            animate={{ opacity: 1 }}
+            initial={{ opacity: 0 }}
+            transition={{ duration: 1, delay: 1.4 }}
+          >
+            National Research University
+          </motion.span>
+          <motion.span
+            animate={{ opacity: 1 }}
+            initial={{ opacity: 0 }}
+            transition={{ duration: 1, delay: 1.5 }}
+          >
+            Founded 1921
+          </motion.span>
+        </div>
+
+        <h1 className={styles.kvCopy}>
+          <span className={styles.kvLine}>
+            <SplitText delay={0.35} text="Cultivate Minds," />
+          </span>
+          <motion.span
+            animate={{ opacity: 1, scaleX: 1 }}
+            className={styles.kvBracket}
+            initial={{ opacity: 0, scaleX: 0.6 }}
+            transition={{ duration: 1.1, delay: 0.9, ease: EASE }}
+          >
+            <span>(</span>
+            <span>)</span>
+          </motion.span>
+          <span className={styles.kvLine}>
+            <SplitText delay={0.75} text="Shape Tomorrow" />
+          </span>
+          <motion.span
+            animate={{ opacity: 1, y: 0 }}
+            className={styles.kvJa}
+            initial={{ opacity: 0, y: 16 }}
+            transition={{ duration: 1, delay: 1.35, ease: EASE }}
+          >
+            成为你自己，从这里开始。
+          </motion.span>
+        </h1>
+
+        <motion.div
+          animate={{ opacity: 1 }}
+          className={styles.kvFoot}
+          initial={{ opacity: 0 }}
+          transition={{ duration: 1, delay: 1.7 }}
+        >
+          <span className={styles.kvScrollWord}>Scroll</span>
+          <span className={styles.kvScrollLine} />
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
+// ==================== 引子 ====================
+
+function Introduction() {
+  return (
+    <section
+      className={styles.intro}
+      data-portal-theme="light"
+      id="introduction"
+    >
+      <div className={styles.introInner}>
+        <Label>Introduction</Label>
+        <p className={styles.introLead}>
+          <FadeLines
+            lines={['一所大学真正的边界，', '不在围墙，而在提问的深度。']}
+          />
+        </p>
+        <p className={styles.introBody}>
+          <FadeLines
+            delay={0.15}
+            lines={[
+              '自 1921 年建校起，我们始终相信教育是一件慢事——',
+              '它需要一代人把答案交给下一代人，再由下一代人推翻重来。',
+              '一百余年过去，校园里换了几轮银杏，',
+              '唯有对未知的好奇，从未改变。',
+            ]}
+          />
+        </p>
+      </div>
+    </section>
+  );
+}
+
+// ==================== 章节（滚动固定） ====================
+
+function ChapterSection({
+  chapter,
+  index,
+}: {
+  chapter: Chapter;
+  index: number;
+}) {
+  const ref = useRef<HTMLElement>(null);
+  const reduced = useReducedMotion();
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ['start end', 'end start'],
+  });
+  // 进入视口下半段淡入、离开上半段淡出，形成参考站「一章一屏」的推进感
+  const opacity = useTransform(
+    scrollYProgress,
+    [0, 0.22, 0.72, 0.94],
+    [0, 1, 1, 0],
+  );
+  const y = useTransform(scrollYProgress, [0, 1], [56, -56]);
+  const scale = useTransform(scrollYProgress, [0, 1], [1.06, 0.96]);
+
+  return (
+    <section
+      className={styles.chapter}
+      data-portal-theme="light"
+      id={chapter.id}
+      ref={ref}
+    >
+      <motion.div
+        className={styles.chapterSticky}
+        style={reduced ? undefined : { opacity, y }}
+      >
+        <motion.div
+          className={styles.chapterFigureWrap}
+          style={reduced ? undefined : { scale }}
+        >
+          <ChapterFigure index={index} />
+        </motion.div>
+
+        <div className={styles.chapterText}>
+          <span className={styles.chapterNo}>Chapter {chapter.no}</span>
+          <h2 className={styles.chapterTitle}>
+            <FadeLines lines={chapter.title} step={0.12} />
+            {chapter.keyword ? (
+              <motion.span
+                className={styles.chapterKeyword}
+                initial={{ opacity: 0, y: 14 }}
+                transition={{ duration: 0.8, delay: 0.3, ease: EASE }}
+                viewport={{ once: true, amount: 0.5 }}
+                whileInView={{ opacity: 1, y: 0 }}
+              >
+                {chapter.keyword}
+              </motion.span>
+            ) : null}
+          </h2>
+          <Label>{chapter.label}</Label>
+          <p className={styles.chapterBody}>
+            <FadeLines delay={0.2} lines={chapter.body} />
+          </p>
+        </div>
+      </motion.div>
+    </section>
+  );
+}
+
+// ==================== 数字 ====================
 
 // 元素进入视口后，从 0 缓动到目标值（easeOutExpo），只跑一次。
 function useCountUp(target: number, run: boolean, duration = 1800) {
   const [value, setValue] = useState(0);
+  const reduced = useReducedMotion();
+
   useEffect(() => {
     if (!run) return;
+    if (reduced) {
+      setValue(target);
+      return;
+    }
     let raf = 0;
     const start = performance.now();
     const tick = (now: number) => {
@@ -85,47 +246,37 @@ function useCountUp(target: number, run: boolean, duration = 1800) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [target, run, duration]);
+  }, [target, run, duration, reduced]);
+
   return value;
 }
 
-function StatItem({
-  value,
-  suffix,
-  label,
-  run,
-}: {
-  value: number;
-  suffix: string;
-  label: string;
-  run: boolean;
-}) {
-  const display = useCountUp(value, run);
+function StatItem({ stat, run }: { stat: Stat; run: boolean }) {
+  const display = useCountUp(stat.value, run);
+
   return (
     <div className={styles.statItem}>
-      <div className={styles.statValue}>
+      <span className={styles.statEn}>{stat.en}</span>
+      <span className={styles.statValue}>
         {display.toLocaleString('en-US')}
-        <span className={styles.statSuffix}>{suffix}</span>
-      </div>
-      <div className={styles.statLabel}>{label}</div>
+        <span className={styles.statSuffix}>{stat.suffix}</span>
+      </span>
+      <span className={styles.statLabel}>{stat.label}</span>
     </div>
   );
 }
 
-// ==================== 首页 ====================
+function Numbers() {
+  const [run, setRun] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
-export default function HomeView() {
-  const [statsRun, setStatsRun] = useState(false);
-  const statsRef = useRef<HTMLDivElement>(null);
-
-  // 统计区进入视口时触发数字滚动
   useEffect(() => {
-    const el = statsRef.current;
+    const el = ref.current;
     if (!el) return;
     const io = new IntersectionObserver(
       ([entry]) => {
         if (entry?.isIntersecting) {
-          setStatsRun(true);
+          setRun(true);
           io.disconnect();
         }
       },
@@ -136,198 +287,278 @@ export default function HomeView() {
   }, []);
 
   return (
-    <div className={styles.page}>
-      {/* ============ HERO ============ */}
-      <section className={styles.hero}>
-        <div className={styles.canvasWrap}>
-          <Scene />
-        </div>
-        <div className={styles.heroOverlay} />
-        <div className={styles.heroContent}>
-          <motion.div
-            animate={{ opacity: 1, y: 0 }}
-            className={styles.badge}
-            initial={{ opacity: 0, y: 20 }}
-            transition={{ duration: 0.6 }}
-          >
-            双一流 · 综合性研究型大学
-          </motion.div>
-          <motion.h1
-            animate={{ opacity: 1, y: 0 }}
-            className={styles.heroTitle}
-            initial={{ opacity: 0, y: 30 }}
-            transition={{ duration: 0.7, delay: 0.1 }}
-          >
-            探索知识边界
-            <br />
-            <span className={styles.heroTitleAccent}>塑造未来世界</span>
-          </motion.h1>
-          <motion.p
-            animate={{ opacity: 1, y: 0 }}
-            className={styles.heroSubtitle}
-            initial={{ opacity: 0, y: 30 }}
-            transition={{ duration: 0.7, delay: 0.25 }}
-          >
-            百年学府，以卓越之教育与前沿之科研，
-            <br />
-            汇聚天下英才，共赴星辰大海。
-          </motion.p>
-          <motion.div
-            animate={{ opacity: 1, y: 0 }}
-            className={styles.heroActions}
-            initial={{ opacity: 0, y: 30 }}
-            transition={{ duration: 0.7, delay: 0.4 }}
-          >
-            <button className={styles.btnPrimary} type="button">
-              了解招生 <span>→</span>
-            </button>
-            <button className={styles.btnGhost} type="button">
-              虚拟校园漫游
-            </button>
-          </motion.div>
-        </div>
-        <div className={styles.scrollHint}>
-          <span className={styles.scrollDot} />
-          向下滚动探索
-        </div>
-      </section>
-
-      {/* ============ 数据统计 ============ */}
-      <section className={styles.stats} ref={statsRef}>
-        <div className={styles.statsInner}>
-          {STATS.map((s) => (
-            <StatItem
-              key={s.label}
-              label={s.label}
-              run={statsRun}
-              suffix={s.suffix}
-              value={s.value}
-            />
+    <section className={styles.numbers} data-portal-theme="dark">
+      <div className={styles.numbersInner} ref={ref}>
+        <Label tone="light">By the Numbers</Label>
+        <div className={styles.statGrid}>
+          {STATS.map((stat) => (
+            <StatItem key={stat.label} run={run} stat={stat} />
           ))}
         </div>
-      </section>
+      </div>
+    </section>
+  );
+}
 
-      {/* ============ 学院与学科 ============ */}
-      <section className={styles.section}>
-        <SectionHeader
-          desc="覆盖理、工、医、文、经、管等多学科门类，构建交叉融合的育人体系。"
-          en="Schools & Disciplines"
-          title="学院与学科"
-        />
-        <div className={styles.schoolGrid}>
-          {SCHOOLS.map((s, i) => (
-            <motion.div
-              className={styles.schoolCard}
-              initial={{ opacity: 0, y: 40 }}
-              key={s.name}
-              transition={{ duration: 0.5, delay: (i % 3) * 0.1 }}
-              viewport={{ once: true, amount: 0.3 }}
-              whileInView={{ opacity: 1, y: 0 }}
-            >
-              <span className={styles.schoolIcon}>{s.icon}</span>
-              <h3 className={styles.schoolName}>{s.name}</h3>
-              <p className={styles.schoolEn}>{s.en}</p>
-              <span className={styles.schoolArrow}>→</span>
-            </motion.div>
-          ))}
+// ==================== 人物 ====================
+
+function Voices() {
+  const scroller = useRef<HTMLDivElement>(null);
+  const [index, setIndex] = useState(0);
+
+  // 单卡步进 = 卡片宽度 + 列间距，避免把 gap 写死在两处
+  const step = useCallback(() => {
+    const el = scroller.current;
+    const first = el?.firstElementChild;
+    if (!el || !(first instanceof HTMLElement)) return 0;
+    const gap = Number.parseFloat(getComputedStyle(el).columnGap) || 0;
+    return first.offsetWidth + gap;
+  }, []);
+
+  const go = (dir: -1 | 1) => {
+    const el = scroller.current;
+    const size = step();
+    if (!el || size === 0) return;
+    el.scrollBy({ left: dir * size, behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const size = step();
+        if (size === 0) return;
+        setIndex(
+          Math.min(
+            VOICES.length - 1,
+            Math.max(0, Math.round(el.scrollLeft / size)),
+          ),
+        );
+      });
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [step]);
+
+  return (
+    <section className={styles.voices} data-portal-theme="light">
+      <div className={styles.voicesHead}>
+        <div>
+          <Label>Voices</Label>
+          <h2 className={styles.sectionTitle}>在这里的人，这样讲述这里。</h2>
         </div>
-      </section>
+        <div className={styles.voicesNav}>
+          <span className={styles.voicesCount}>
+            {String(index + 1).padStart(2, '0')}
+            <span className={styles.voicesCountTotal}>
+              {' / '}
+              {String(VOICES.length).padStart(2, '0')}
+            </span>
+          </span>
+          <button
+            aria-label="上一位"
+            className={styles.voicesArrow}
+            disabled={index === 0}
+            onClick={() => go(-1)}
+            type="button"
+          >
+            ←
+          </button>
+          <button
+            aria-label="下一位"
+            className={styles.voicesArrow}
+            disabled={index === VOICES.length - 1}
+            onClick={() => go(1)}
+            type="button"
+          >
+            →
+          </button>
+        </div>
+      </div>
 
-      {/* ============ 新闻资讯 ============ */}
-      <section className={`${styles.section} ${styles.sectionDark}`}>
-        <SectionHeader
-          desc="聚焦校园动态，传递学术前沿与人文温度。"
-          en="News & Events"
-          title="新闻资讯"
-        />
-        <div className={styles.newsList}>
-          {NEWS.map((n, i) => (
-            <motion.button
-              className={styles.newsItem}
-              initial={{ opacity: 0, x: -30 }}
-              key={n.title}
-              transition={{ duration: 0.5, delay: i * 0.08 }}
+      <div className={styles.voicesRail} ref={scroller}>
+        {VOICES.map((voice) => (
+          <article className={styles.voiceCard} key={voice.no}>
+            <span className={styles.voiceVol}>
+              Vol.<span className={styles.voiceVolNo}>{voice.no}</span>
+            </span>
+            <p className={styles.voiceQuote}>{voice.quote}</p>
+            <div className={styles.voiceMeta}>
+              <span className={styles.voiceNameEn}>{voice.nameEn}</span>
+              <span className={styles.voiceName}>{voice.name}</span>
+              <span className={styles.voiceRole}>{voice.role}</span>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// ==================== ON / OFF 切换 ====================
+
+function OnOff() {
+  const [key, setKey] = useState<'learn' | 'live'>('learn');
+  const scene = SWITCH_SCENES.find((s) => s.key === key) ?? SWITCH_SCENES[0];
+  if (!scene) return null;
+
+  return (
+    <section className={styles.onoff} data-portal-theme="light">
+      <div className={styles.onoffInner}>
+        <Label>Campus / On &amp; Off</Label>
+        <h2 className={styles.sectionTitle}>
+          课业之内与之外，都是大学的一部分。
+        </h2>
+
+        <div className={styles.switchTrack} role="tablist">
+          {SWITCH_SCENES.map((item) => (
+            <button
+              aria-selected={item.key === key}
+              className={`${styles.switchBtn} ${
+                item.key === key ? styles.switchBtnOn : ''
+              }`}
+              key={item.key}
+              onClick={() => setKey(item.key)}
+              role="tab"
               type="button"
-              viewport={{ once: true, amount: 0.4 }}
-              whileInView={{ opacity: 1, x: 0 }}
             >
-              <span className={styles.newsTag}>{n.tag}</span>
-              <span className={styles.newsTitle}>{n.title}</span>
-              <span className={styles.newsDate}>{n.date}</span>
-            </motion.button>
+              {item.key === key ? (
+                <motion.span
+                  className={styles.switchPill}
+                  layoutId="switch-pill"
+                  transition={{ duration: 0.45, ease: EASE }}
+                />
+              ) : null}
+              <span className={styles.switchState}>{item.state}</span>
+              <span className={styles.switchLabel}>{item.label}</span>
+            </button>
           ))}
         </div>
-      </section>
+
+        <AnimatePresence mode="wait">
+          <motion.ul
+            animate={{ opacity: 1, y: 0 }}
+            className={styles.onoffList}
+            exit={{ opacity: 0, y: -16 }}
+            initial={{ opacity: 0, y: 16 }}
+            key={scene.key}
+            transition={{ duration: 0.4, ease: EASE }}
+          >
+            {scene.items.map((item) => (
+              <li className={styles.onoffItem} key={item.en}>
+                <span className={styles.onoffEn}>{item.en}</span>
+                <span className={styles.onoffTitle}>{item.title}</span>
+                <span className={styles.onoffDesc}>{item.desc}</span>
+              </li>
+            ))}
+          </motion.ul>
+        </AnimatePresence>
+      </div>
+    </section>
+  );
+}
+
+// ==================== 新闻 ====================
+
+function News() {
+  return (
+    <section className={styles.news} data-portal-theme="light">
+      <div className={styles.newsHead}>
+        <Label>News &amp; Topics</Label>
+        <h2 className={styles.sectionTitle}>最近发生的事。</h2>
+      </div>
+      <ul className={styles.newsList}>
+        {NEWS.map((item, i) => (
+          <motion.li
+            initial={{ opacity: 0, y: 20 }}
+            key={item.title}
+            transition={{ duration: 0.6, delay: (i % 5) * 0.06, ease: EASE }}
+            viewport={{ once: true, amount: 0.6 }}
+            whileInView={{ opacity: 1, y: 0 }}
+          >
+            <button className={styles.newsItem} type="button">
+              <span className={styles.newsDate}>{item.date}</span>
+              <span className={styles.newsCategory}>{item.category}</span>
+              <span className={styles.newsTitle}>{item.title}</span>
+              <span className={styles.newsArrow}>→</span>
+            </button>
+          </motion.li>
+        ))}
+      </ul>
+      <div className={styles.newsMore}>
+        <CubeButton en="Archive" label="查看全部" variant="pill" />
+      </div>
+    </section>
+  );
+}
+
+// ==================== 首页 ====================
+
+export default function HomeView() {
+  return (
+    <div className={styles.page}>
+      <div className={styles.noise} />
+      <SceneRail />
+
+      <KeyVisual />
+      <Introduction />
+
+      {CHAPTERS.map((chapter, i) => (
+        <ChapterSection chapter={chapter} index={i} key={chapter.id} />
+      ))}
+
+      <Numbers />
+      <Voices />
+      <OnOff />
+      <News />
 
       {/* ============ 快速入口 ============ */}
-      <section className={styles.section}>
-        <SectionHeader
-          desc="常用服务一键直达。"
-          en="Quick Access"
-          title="快速入口"
-        />
-        <div className={styles.linkGrid}>
-          {QUICK_LINKS.map((l, i) => (
-            <motion.button
-              className={styles.linkCard}
-              initial={{ opacity: 0, scale: 0.9 }}
-              key={l.label}
-              transition={{ duration: 0.4, delay: (i % 6) * 0.06 }}
-              type="button"
-              viewport={{ once: true, amount: 0.3 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-            >
-              <span className={styles.linkIcon}>{l.icon}</span>
-              <span className={styles.linkLabel}>{l.label}</span>
-            </motion.button>
-          ))}
+      <section className={styles.access} data-portal-theme="dark">
+        <div className={styles.accessInner}>
+          <Label tone="light">Quick Access</Label>
+          <h2 className={`${styles.sectionTitle} ${styles.sectionTitleLight}`}>
+            常用服务，一步直达。
+          </h2>
+          <div className={styles.accessGrid}>
+            {QUICK_LINKS.map((link) => (
+              <CubeButton en={link.en} key={link.en} label={link.label} />
+            ))}
+          </div>
         </div>
       </section>
 
       {/* ============ CTA ============ */}
-      <section className={styles.cta}>
-        <motion.div
-          className={styles.ctaInner}
-          initial={{ opacity: 0, y: 40 }}
-          transition={{ duration: 0.7 }}
-          viewport={{ once: true, amount: 0.4 }}
-          whileInView={{ opacity: 1, y: 0 }}
-        >
-          <h2 className={styles.ctaTitle}>与卓越同行，从这里启程</h2>
-          <p className={styles.ctaDesc}>
-            无论你是求学者、研究者还是合作伙伴，我们都期待与你相遇。
+      {/* CTA 是绿底：墨色文字对比度 6.1:1，优于白色的 3.1:1，故按 light 处理 */}
+      <section className={styles.cta} data-portal-theme="light">
+        <div className={styles.ctaInner}>
+          <span className={styles.ctaEn}>
+            <SplitText inView step={0.035} text="Begin Here" />
+          </span>
+          <p className={styles.ctaCopy}>
+            <FadeLines
+              delay={0.2}
+              lines={[
+                '无论你是求学者、研究者',
+                '还是同行者，',
+                '我们都在这里等你。',
+              ]}
+            />
           </p>
-          <button className={styles.btnPrimary} type="button">
-            立即申请 <span>→</span>
-          </button>
-        </motion.div>
+          <CubeButton
+            backLabel="现在就去"
+            en="Admission"
+            label="立即申请"
+            variant="pill"
+          />
+        </div>
       </section>
     </div>
-  );
-}
-
-// ==================== 通用区块标题 ====================
-
-function SectionHeader({
-  title,
-  en,
-  desc,
-}: {
-  title: string;
-  en: string;
-  desc: string;
-}) {
-  return (
-    <motion.div
-      className={styles.sectionHeader}
-      initial={{ opacity: 0, y: 24 }}
-      transition={{ duration: 0.6 }}
-      viewport={{ once: true, amount: 0.6 }}
-      whileInView={{ opacity: 1, y: 0 }}
-    >
-      <span className={styles.sectionEn}>{en}</span>
-      <h2 className={styles.sectionTitle}>{title}</h2>
-      <p className={styles.sectionDesc}>{desc}</p>
-    </motion.div>
   );
 }
