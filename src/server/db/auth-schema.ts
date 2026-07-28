@@ -7,7 +7,10 @@ import { boolean, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
-  // better-auth 内部需要这两个字段，实际登录不使用 email
+  // email 是两种登录方式（email-otp / email-password）共同的账号标识，
+  // 同时也是 ADMIN_EMAILS 白名单的比对依据（见 services/admin-check）。
+  // 保持 nullable 是历史遗留：改 notNull 需要迁移并处理存量 NULL，
+  // 现阶段由 isAdminEmail / listUsers 各自兜住 null。
   email: text('email').unique(),
   emailVerified: boolean('email_verified').default(false),
   image: text('image'),

@@ -34,7 +34,7 @@ CI 由运维基于 `Dockerfile` 在 Jenkins 中自行配置构建/部署，仓�
 src/
 ├── app/                    # Next.js App Router 路由
 │   ├── (portal)/           # 门户网站页面（仅首页 `/`）
-│   ├── admin/              # 管理后台页面（仅系统设置 + 审计日志）
+│   ├── admin/              # 管理后台页面（用户管理 + 审计日志 + 门户设置）
 │   ├── api/                # API 路由（tRPC、Better Auth、文件上传）
 │   └── signin/             # 登录页
 ├── components/             # 通用组件
@@ -55,10 +55,11 @@ src/
 
 ### 管理后台
 
-| 模块 | 说明 |
-|------|------|
-| 系统设置 | 门户配置（站点标题、Logo、主题色、SEO、页脚、社交链接） |
-| 审计日志 | 后台操作日志查询、导出与清理策略配置 |
+| 模块 | 路径 | 说明 |
+|------|------|------|
+| 用户管理 | `/admin/users` | 创建 / 删除后台账号（管理员权限由 `ADMIN_EMAILS` 决定） |
+| 审计日志 | `/admin/audit-logs` | 后台操作日志查询、导出与清理策略配置 |
+| 门户设置 | `/admin/setting` | 门户配置（站点标题、Logo、主题色、SEO、页脚、社交链接） |
 
 ## 快速开始
 
@@ -105,7 +106,7 @@ pnpm dev
 站点不提供任何公开注册入口，账号只能由服务端内部创建：
 
 - `scripts/seed-admin.ts`（Docker 启动时通过 `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` 自动执行）
-- tRPC 的 `sys.createUser`（内部调用 Better Auth，不经过公开注册端点；后台暂未提供对应页面入口）
+- 后台「用户管理」页（`/admin/users`，走 tRPC 的 `sys.createUser`，内部调用 Better Auth，不经过公开注册端点）
 
 两条公开注册路径都已封堵：`/api/auth/sign-up/email` 在 HTTP 层返回 404，emailOTP 插件开启 `disableSignUp`（否则任意邮箱都能凭验证码自助建号）。
 
@@ -142,17 +143,20 @@ pnpm dev
 项目提供 `Dockerfile` 和 `docker-compose.yml`，由运维在 Jenkins 中基于此自行配置构建与发布，仓库不维护 CI 流水线。
 
 ```bash
-# 构建镜像
-docker build -t organova-app .
+# 构建镜像（两个 target：应用 + Nginx）
+docker build -t organova-app:local --target runner .
+docker build -t organova-nginx:local --target nginx .
 
 # 启动服务（需设置 APP_IMAGE、NGINX_IMAGE 环境变量）
-APP_IMAGE=organova-app NGINX_IMAGE=nginx:alpine docker compose up -d
+APP_IMAGE=organova-app:local NGINX_IMAGE=organova-nginx:local docker compose up -d
 ```
 
-生产环境默认监听 `HOST_PORT`（默认 5000），通过 Nginx 反向代理到应用容器。
+Nginx 镜像必须由本仓库的 `--target nginx` 构建：它内含 `nginx.conf`、`_next/static`
+与 public 静态资源，用官方 `nginx:alpine` 顶替会得到一个没有任何配置的空容器。
 
-数据库迁移在每次部署时需单独执行：
+生产环境默认监听 `HOST_PORT`（默认 `80`，见 `.env.example` 与 `docker-compose.yml`），
+通过 Nginx 反向代理到应用容器。
 
-```bash
-pnpm db:migrate
-```
+数据库迁移**无需手动执行**：容器启动命令里已包含 `node migrate.mjs`，每次部署会自动
+按 `drizzle/meta/_journal.json` 增量应用未执行的迁移，失败则直接退出容器（`set -e`）。
+本地开发才需要手动跑 `pnpm db:migrate`。
