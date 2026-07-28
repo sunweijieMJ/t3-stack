@@ -25,8 +25,10 @@ Organova 官网全栈项目，包含一个门户首页和一个仅提供系统�
 | [Husky](https://typicode.github.io/husky/) | Git hooks（pre-commit / commit-msg / pre-push） |
 | [Commitlint](https://commitlint.js.org/) | 提交信息规范 (`type: subject`) |
 | [cspell](https://cspell.org/) | 拼写检查 |
+| [GitHub Actions](https://docs.github.com/actions) | CI（质量门禁）与自建服务器部署 |
 
-CI 由运维基于 `Dockerfile` 在 Jenkins 中自行配置构建/部署，仓库不内置 GitHub Actions。
+`.github/workflows/check-quality.yml` 在每次 push / PR 上跑 lint、类型检查、拼写检查、
+单测（含覆盖率阈值）与构建 —— 与本地 pre-commit 钩子是同一套命令。
 
 ## 项目结构
 
@@ -140,7 +142,52 @@ pnpm dev
 
 ## 部署
 
-项目提供 `Dockerfile` 和 `docker-compose.yml`，由运维在 Jenkins 中基于此自行配置构建与发布，仓库不维护 CI 流水线。
+支持两条路径：**Vercel**（一键，适合演示与轻量生产）与 **自建服务器**（Docker + Nginx，
+功能完整）。两者的能力差异见下方对照表。
+
+### 部署到 Vercel
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FsunweijieMJ%2Ft3-stack&env=DATABASE_URL,BETTER_AUTH_SECRET,ADMIN_EMAILS,SMTP_USER,SMTP_PASS&envDescription=%E5%BF%85%E5%A1%AB%E9%A1%B9%EF%BC%9A%E6%95%B0%E6%8D%AE%E5%BA%93%E3%80%81%E8%AE%A4%E8%AF%81%E5%AF%86%E9%92%A5%E3%80%81%E7%AE%A1%E7%90%86%E5%91%98%E9%82%AE%E7%AE%B1%E4%B8%8E%20SMTP&envLink=https%3A%2F%2Fgithub.com%2FsunweijieMJ%2Ft3-stack%2Fblob%2Fmaster%2F.env.example&project-name=organova-website&repository-name=organova-website)
+
+点击后需要填 5 个变量，缺任何一个都会在构建期直接失败（`src/env.js` 会校验）：
+
+| 变量 | 说明 |
+|------|------|
+| `DATABASE_URL` | PostgreSQL 连接串。Vercel 上可用 Neon / Supabase 等托管库 |
+| `BETTER_AUTH_SECRET` | `openssl rand -base64 32` 生成 |
+| `ADMIN_EMAILS` | 管理员邮箱白名单，不填则没有人能进后台 |
+| `SMTP_USER` / `SMTP_PASS` | 默认登录方式是邮箱验证码，没有 SMTP 就登不进去。<br>若改用 `AUTH_METHOD=email-password` 则可留空 |
+
+**`BETTER_AUTH_URL` 不需要填** —— 一键部署时域名还没分配，根本填不出来。
+`src/env.js` 会在 Vercel 上自动取 `VERCEL_PROJECT_PRODUCTION_URL`（生产）
+或 `VERCEL_URL`（预览）兜底；有自定义域名后再显式配置它即可。
+
+部署完成后，建议在 Project Settings → Environment Variables 补上：
+
+| 变量 | 建议值 | 不配的后果 |
+|------|--------|-----------|
+| `TRUST_PROXY_HEADERS` | `true` | 限流全站共用一个桶，审计日志记不到真实 IP |
+| `REDIS_URL` | Upstash 等 | 限流退化为单实例内存计数，Serverless 下几乎失效 |
+| `STORAGE_PROVIDER` + `OSS_*` | `oss` | 后台上传 Logo / PDF 直接失败（函数文件系统只读） |
+
+数据库迁移由 `scripts/vercel-build.sh` 在构建期自动执行，**仅限 production 环境** ——
+预览部署常与生产共用同一个 `DATABASE_URL`，自动迁移会让任意 PR 的预览构建改动生产库结构。
+
+### Vercel 与自建服务器的能力差异
+
+| 能力 | 自建（Docker + Nginx） | Vercel |
+|------|----------------------|--------|
+| 文件上传 | `local` 直接写卷，开箱可用 | 必须接 OSS（函数文件系统只读且实例短暂） |
+| 限流 | 单实例内存计数即可 | 必须接 Redis，否则各实例各算各的 |
+| 审计日志 / 异步清理 | 长进程自然 flush | 依赖 `after()` 保活（代码已统一处理） |
+| 数据库迁移 | 容器启动时自动 | 构建期自动（仅 production） |
+| 静态资源 | Nginx 直出 + 强缓存 | Vercel CDN |
+
+### 部署到自建服务器
+
+项目提供 `Dockerfile` 和 `docker-compose.yml`；`.github/workflows/build-deploy.yml`
+会把镜像推到 GHCR 并通过 SSH 调用服务器上的 `manage.sh` 完成滚动更新。
+该工作流只在**推送 `v*` tag** 或**手动触发**时运行，未配置服务器 secrets 时会自动跳过部署。
 
 ```bash
 # 构建镜像（两个 target：应用 + Nginx）

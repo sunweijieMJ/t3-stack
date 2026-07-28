@@ -3,7 +3,10 @@ import './src/env.js';
 
 /** @type {import("next").NextConfig} */
 const config = {
-  output: 'standalone',
+  // standalone 是 Docker 部署的前提（Dockerfile 从 .next/standalone 拷贝产物）。
+  // Vercel 自己接管产物打包，此时再产出一份 standalone 只是白白拖慢构建、增大缓存，
+  // 官方也建议不要设置。VERCEL=1 由 Vercel 构建环境自动注入。
+  output: process.env.VERCEL ? undefined : 'standalone',
   // ali-oss 含 Node.js 原生依赖，不能被 Turbopack 打包
   serverExternalPackages: ['ali-oss'],
   // 注意：这里原本有 images.remotePatterns（把 OSS_BASE_URL 解析成 next/image 白名单），

@@ -5,6 +5,25 @@ import { z } from 'zod';
 const stripQuotes = (/** @type {string | undefined} */ v) =>
   v?.replace(/^["']|["']$/g, '');
 
+/**
+ * Vercel 上 BETTER_AUTH_URL 存在先有鸡还是先有蛋的问题：一键部署（Deploy Button）
+ * 在首次构建前就要求填环境变量，而此时域名还没分配，用户根本填不出来。
+ * 缺它又会因为 `NODE_ENV=production 时 z.url()` 直接构建失败。
+ * 这里用 Vercel 注入的域名兜底（显式配置的 BETTER_AUTH_URL 始终优先）：
+ *   - 生产：VERCEL_PROJECT_PRODUCTION_URL —— 稳定的生产域名，不随每次部署变化，
+ *     用它签发的 cookie 与回调地址在多次部署之间保持一致。
+ *   - 预览/开发：VERCEL_URL —— 本次部署的专属域名。不能在这里用生产域名，
+ *     否则预览环境的登录回调会打到生产站上。
+ * 两者都不带协议，Vercel 全站 HTTPS，补 https:// 即可。
+ */
+const vercelBaseUrl = () => {
+  const host =
+    process.env.VERCEL_ENV === 'production'
+      ? process.env.VERCEL_PROJECT_PRODUCTION_URL
+      : process.env.VERCEL_URL;
+  return host ? `https://${host}` : undefined;
+};
+
 export const env = createEnv({
   server: {
     DATABASE_URL: z.url(),
@@ -73,7 +92,10 @@ export const env = createEnv({
     DATABASE_URL: stripQuotes(process.env.DATABASE_URL),
     NODE_ENV: stripQuotes(process.env.NODE_ENV),
     BETTER_AUTH_SECRET: stripQuotes(process.env.BETTER_AUTH_SECRET),
-    BETTER_AUTH_URL: stripQuotes(process.env.BETTER_AUTH_URL),
+    // 用 || 而非 ??：emptyStringAsUndefined 的转换发生在 runtimeEnv 组装之后，
+    // 空串走 ?? 不会触发兜底，仍会带着 '' 去撞 z.url() 校验。
+    BETTER_AUTH_URL:
+      stripQuotes(process.env.BETTER_AUTH_URL) || vercelBaseUrl(),
     ADMIN_EMAILS: stripQuotes(process.env.ADMIN_EMAILS),
     SMTP_HOST: stripQuotes(process.env.SMTP_HOST),
     SMTP_PORT: stripQuotes(process.env.SMTP_PORT),
@@ -147,5 +169,22 @@ if (typeof window === 'undefined' && !process.env.SKIP_ENV_VALIDATION) {
       '⚠️  TRUST_PROXY_HEADERS=false：所有 /api/* 请求将共享同一个限流桶，' +
         '审计日志也记不到真实 IP。若本服务位于 nginx / CDN 等受信代理之后，请设为 true。',
     );
+  }
+
+  // Serverless（Vercel）与本项目默认值不兼容的两处，只告警不阻断：
+  // 用不到上传、且能接受单实例限流的部署仍然是可用的，不该被拦住。
+  if (process.env.VERCEL) {
+    if (env.STORAGE_PROVIDER === 'local') {
+      console.warn(
+        '⚠️  Vercel 上 STORAGE_PROVIDER=local 不可用：函数文件系统只读且实例短暂，' +
+          '后台上传 Logo / PDF 会失败。请设为 oss 并配齐 OSS_* 变量。',
+      );
+    }
+    if (!env.REDIS_URL) {
+      console.warn(
+        '⚠️  Vercel 上未配置 REDIS_URL：限流退化为进程内计数，而 Serverless 每个实例' +
+          '各算各的，限流几乎失效。请配置 Redis（Upstash 等）后端。',
+      );
+    }
   }
 }
