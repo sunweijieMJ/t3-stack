@@ -45,6 +45,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // 见 tests/stubs/server-only.ts 的说明：不替换的话，任何 import 服务端模块
+      // 的测试都会在导入阶段被 server-only 抛错中断。
+      'server-only': path.resolve(__dirname, './tests/stubs/server-only.ts'),
       '@': path.resolve(__dirname, './src'),
     },
   },
