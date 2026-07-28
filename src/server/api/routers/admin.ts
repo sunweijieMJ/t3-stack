@@ -232,11 +232,13 @@ export const adminRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const deleted = await ctx.db
+      // 不能用 .returning({ id }) 再取 length：那会让 PG 把每一行被删的 id 都回传，
+      // drizzle 再逐行实例化成对象——清理两年积压的日志时足以打爆内存，
+      // 而这里只需要一个计数。postgres.js 的结果对象自带受影响行数（RowList.count）。
+      const result = await ctx.db
         .delete(adminAuditLog)
-        .where(lt(adminAuditLog.createdAt, new Date(input.beforeDate)))
-        .returning({ id: adminAuditLog.id });
-      return { deleted: deleted.length };
+        .where(lt(adminAuditLog.createdAt, new Date(input.beforeDate)));
+      return { deleted: result.count };
     }),
 
   // 通用的 getConfig / setConfig 已移除：

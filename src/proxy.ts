@@ -15,6 +15,9 @@ const adminPatterns = [/^\/admin(\/|$)/];
 // 有成本的验证码发送端点（邮件），单独严格限流
 const OTP_SEND_PATHS = new Set(['/api/auth/email-otp/send-verification-otp']);
 
+// 探活端点：豁免全部限流（见 proxy() 开头的说明）
+const HEALTH_PATH = '/api/health';
+
 function rateLimitResponse(retryAfterMs: number, message: string) {
   // 同时返回 message（better-auth 客户端读取此字段）、code 与 error（上传等接口读取 error），
   // 确保限流提示能被前端正确解析展示，而非回退成误导性的「验证码错误」。
@@ -29,6 +32,15 @@ function rateLimitResponse(retryAfterMs: number, message: string) {
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // 健康检查必须早退，不能进入下面的全局 IP 限流：
+  // docker healthcheck 直连 127.0.0.1:3000（不经 nginx），外部 LB 探活经 nginx 但
+  // 该 location 也没有 X-Real-IP，两者的 getClientIp 都是 'unknown'，会挤在同一个
+  // 共享桶里（默认 60 次/分钟）。探活频率一高就开始收 429 → compose 判定 unhealthy
+  // → restart: on-failure 重启容器，现场表现为「应用不稳定」，排查方向被完全带偏。
+  // 探活端点本身不该限流，它既无成本也无攻击价值（只做一次 SELECT 1）。
+  if (pathname === HEALTH_PATH) return NextResponse.next();
+
   const ip = getClientIp(request);
 
   // API 全局 IP 限流
