@@ -58,8 +58,20 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    # 这里刻意不设 SKIP_ENV_VALIDATION，而是灌一组假值让 src/env.js 真的跑一遍。
+    # 原因：Vercel 的构建入口（scripts/vercel-build.sh）不跳过校验，若 CI 跳过，
+    # 「改坏 env schema / 新增一个必填变量」这类问题会 CI 全绿、Vercel 构建炸。
+    # 下面 5 个正是 README 里一键部署要求填的必填项（next build 期间 NODE_ENV=production，
+    # 会触发 BETTER_AUTH_SECRET / BETTER_AUTH_URL 的必填分支，以及 AUTH_METHOD
+    # 默认 email-otp 下 SMTP_USER / SMTP_PASS 的跨字段必填检查）。
+    # DATABASE_URL 指向一个必然连不上的地址：构建日志里会出现一条 ECONNREFUSED，
+    # 那是 getFrontendConfig() 的降级路径打出来的，属预期，不影响构建成功。
     env:
-      SKIP_ENV_VALIDATION: 1
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
+      BETTER_AUTH_SECRET: ci-build-only-not-a-real-secret
+      BETTER_AUTH_URL: http://localhost:3000
+      SMTP_USER: ci@example.com
+      SMTP_PASS: ci-build-only-placeholder
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

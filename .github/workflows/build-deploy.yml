@@ -40,6 +40,12 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+# 顶层收紧到只读：preflight 与 summary 两个 job 不声明自己的 permissions，
+# 没有这行就会继承仓库默认（很多仓库仍是 read-write-all）。
+# 需要额外权限的 build（packages: write）与 deploy（packages: read）各自覆盖。
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -67,10 +73,14 @@ jobs:
         env:
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
 
+      # 必须与下面 metadata-action 的 `type=sha` 取同一个值：它固定截 github.sha 的
+      # 前 7 位。这里不能用 `git rev-parse --short`——那是 core.abbrev=auto，长度随
+      # 仓库对象数增长，仓库长大后会变成 8 位，于是 deploy 会去 pull 一个不存在的
+      # tag（build 成功、部署失败）。改长度请两边一起改（metadata 用 type=sha,format=long）。
       - name: Generate build info
         id: info
         run: |
-          echo "git_hash=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "git_hash=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
@@ -94,6 +104,8 @@ jobs:
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # scope 必须区分：type=gha 不指定 scope 时两个 target 共用同一个缓存 key，
+      # 后一步的 cache-to 会把前一步导出的缓存整个覆盖掉，结果是每次跑都缓存半失效。
       - name: Build and push (app)
         uses: docker/build-push-action@v7
         with:
@@ -102,8 +114,8 @@ jobs:
           target: runner
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
 
       - name: Extract nginx metadata
         id: nginx-meta
@@ -125,8 +137,8 @@ jobs:
           target: nginx
           tags: ${{ steps.nginx-meta.outputs.tags }}
           labels: ${{ steps.nginx-meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=nginx
+          cache-to: type=gha,mode=max,scope=nginx
 
   # secrets 上下文在 job 级 if 里不可靠，因此单独用一个 job 把「是否配齐」
   # 降级成普通 output，供 deploy job 的 if 判断。
