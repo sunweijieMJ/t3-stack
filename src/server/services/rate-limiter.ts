@@ -125,15 +125,31 @@ async function getBackend(): Promise<LimiterBackend> {
         try {
           const { Redis } = await import('ioredis');
           const client = new Redis(env.REDIS_URL, {
-            lazyConnect: false,
+            // 必须显式等握手完成再把 client 交出去（见下面的 await connect）。
+            // 原来是 lazyConnect:false + enableOfflineQueue:false —— 前者只是「发起」
+            // 握手而不等待，后者让未就绪时的命令立刻抛错。在 Serverless 上这是致命组合：
+            // Vercel 在响应返回后会冻结进程，未被 await 的握手根本没机会推进，于是
+            // 每一次调用都撞上 `Stream isn't writeable`，被 check() 的 catch 吞掉后
+            // fail-open —— 表现为「配了 REDIS_URL，Redis 里却一个 key 都没有」，
+            // 限流实际上从未生效。线上日志实测每次请求都报，不是冷启动的偶发窗口。
+            lazyConnect: true,
             maxRetriesPerRequest: 1,
-            enableOfflineQueue: false,
+            // 允许离线排队：断线重连期间命令排队等待，而不是直接抛错。
+            // 上限由 commandTimeout 兜住，Redis 真挂了也不会把请求吊死。
+            enableOfflineQueue: true,
+            connectTimeout: 3000,
+            commandTimeout: 2000,
           });
           client.on('error', (err) => {
             console.error('[rate-limiter] Redis client error:', err.message);
           });
+          await client.connect();
           return new RedisBackend(client);
         } catch (err) {
+          // 连不上就退化为内存后端。注意 backendPromise 是记忆化的，本进程不会再重试：
+          // Serverless 下实例短暂，下一个实例自然会重连，这是自愈的；长驻部署
+          // （Docker 单实例）则会一直用内存后端直到重启 —— 单实例场景下内存计数本就有效，
+          // 代价可接受，换来的是「Redis 挂了不会让每个请求都付一次 connectTimeout」。
           console.error(
             '[rate-limiter] Failed to init Redis backend, fallback to memory:',
             err,
