@@ -62,6 +62,15 @@ export const auth = betterAuth({
   session: {
     expiresIn: 60 * 60, // 1 小时过期
     updateAge: 5 * 60, // 活跃用户每 5 分钟自动续期
+    // 一次后台页面加载会查三遍 session：proxy 的路由守卫、admin layout 的服务端校验、
+    // 以及客户端 tRPC 批请求的 createTRPCContext。三次都各打一趟 DB（跨 Node 调用，
+    // React cache 兜不住），Serverless 下还各自附带一次冷连接开销。
+    //
+    // cookieCache 把 session 快照签名后放进 cookie，命中期内不查库，上面三次退化为一次。
+    // 代价是「注销 / 删号」到真正失效之间有最长 maxAge 的窗口。这里取 60s 而非
+    // better-auth 默认的 5 分钟：一次页面加载的多次校验发生在 1 秒内，60s 已经吃满收益，
+    // 而失效延迟对「删除用户后立刻踢下线」这种管理动作来说仍在可接受范围。
+    cookieCache: { enabled: true, maxAge: 60 },
   },
   advanced: {
     useSecureCookies,

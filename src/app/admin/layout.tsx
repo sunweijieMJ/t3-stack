@@ -11,9 +11,13 @@ export default async function AdminLayout({
   children: React.ReactNode;
 }) {
   const session = await getSession();
-  // 未登录时回带 callbackUrl=/admin，避免登录后落到网站首页（精确子路径需要中间件
-  // 注入 pathname，当前实现仅恢复到 admin 首页）；signin 表单已对 callbackUrl 做白名单防护。
-  if (!session?.user) redirect('/signin?callbackUrl=/admin');
+  // 这两条 redirect 实际上是兜底：proxy.ts 的 adminPatterns 会先一步拦下 /admin/*，
+  // 未登录时带着**真实 pathname** 跳登录页，非管理员则打回首页。
+  // 之所以保留，是因为 proxy 的 matcher 是配置文件里的一行正则 —— 哪天被改窄了，
+  // 这里还能挡住越权访问，而不是直接把后台裸露出去。
+  // 不在这里拼 callbackUrl：这层拿不到子路径，写死 /admin 反而会把 proxy 已经
+  // 正确回传的路径覆盖成后台首页。
+  if (!session?.user) redirect('/signin');
 
   if (!isAdminEmail(session.user.email)) {
     redirect('/');

@@ -116,6 +116,32 @@ export const adminRouter = createTRPCRouter({
           message: '不能删除自己的账户',
         });
       }
+
+      // 不能把最后一个管理员账号删掉。
+      // 「不能删自己」只挡住了最直接的一种自锁，两个管理员互删仍然能把后台锁死：
+      // A 删 B、B 删 A，最后谁都进不去（管理员身份取决于 ADMIN_EMAILS 白名单里的
+      // 邮箱在 user 表里**有对应账号**，账号没了就登不上）。
+      // 这里在删之前数一遍剩余的管理员账号，只剩一个就拒绝。
+      const [target] = await ctx.db
+        .select({ email: user.email })
+        .from(user)
+        .where(eq(user.id, input.userId))
+        .limit(1);
+      if (!target) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '用户不存在' });
+      }
+      if (isAdminEmail(target.email)) {
+        const rows = await ctx.db.select({ email: user.email }).from(user);
+        const adminCount = rows.filter((r) => isAdminEmail(r.email)).length;
+        if (adminCount <= 1) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message:
+              '这是最后一个管理员账号，删除后将无人能进入后台。请先创建另一个管理员账号（邮箱需在 ADMIN_EMAILS 白名单中）。',
+          });
+        }
+      }
+
       await ctx.db.delete(user).where(eq(user.id, input.userId));
       return { success: true };
     }),
