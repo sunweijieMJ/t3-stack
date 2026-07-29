@@ -149,7 +149,9 @@
     "metalness",
     "emissive",
     "fov",
-    "dpr"
+    "dpr",
+    "nosniff",
+    "SAMEORIGIN"
   ],
   "patterns": [
     {

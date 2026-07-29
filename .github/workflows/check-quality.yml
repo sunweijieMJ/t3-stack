@@ -61,17 +61,21 @@ jobs:
     # 这里刻意不设 SKIP_ENV_VALIDATION，而是灌一组假值让 src/env.js 真的跑一遍。
     # 原因：Vercel 的构建入口（scripts/vercel-build.sh）不跳过校验，若 CI 跳过，
     # 「改坏 env schema / 新增一个必填变量」这类问题会 CI 全绿、Vercel 构建炸。
-    # 下面 5 个正是 README 里一键部署要求填的必填项（next build 期间 NODE_ENV=production，
-    # 会触发 BETTER_AUTH_SECRET / BETTER_AUTH_URL 的必填分支，以及 AUTH_METHOD
-    # 默认 email-otp 下 SMTP_USER / SMTP_PASS 的跨字段必填检查）。
+    # 下面 3 个是 next build 期间（NODE_ENV=production）zod schema 真正会拦的必填项。
+    #
+    # BETTER_AUTH_SECRET 必须 ≥32 字符：src/env.js 对生产分支加了 min(32)，
+    # 这串占位符正好卡在长度线上过，改短了 CI 会直接红。
+    #
+    # 不再灌 SMTP_USER / SMTP_PASS：AUTH_METHOD=email-otp 下的跨字段必填检查
+    # 已改为「构建期放过、启动期保留」（src/env.js 的 isNextBuild 分支），
+    # 因为 SMTP 是纯运行时依赖，编译产物不依赖它。灌了也验不到东西，反而误导。
+    #
     # DATABASE_URL 指向一个必然连不上的地址：构建日志里会出现一条 ECONNREFUSED，
     # 那是 getFrontendConfig() 的降级路径打出来的，属预期，不影响构建成功。
     env:
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
-      BETTER_AUTH_SECRET: ci-build-only-not-a-real-secret
+      BETTER_AUTH_SECRET: ci-build-only-not-a-real-secret-value
       BETTER_AUTH_URL: http://localhost:3000
-      SMTP_USER: ci@example.com
-      SMTP_PASS: ci-build-only-placeholder
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

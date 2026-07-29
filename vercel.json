@@ -7,21 +7,17 @@
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
-        {
-          "key": "Referrer-Policy",
-          "value": "strict-origin-when-cross-origin"
-        },
         {
           "key": "Strict-Transport-Security",
           "value": "max-age=63072000; includeSubDomains; preload"
         }
       ]
-    },
+    }
+  ],
+  "crons": [
     {
-      "source": "/api/(.*)",
-      "headers": [{ "key": "X-Robots-Tag", "value": "noindex" }]
+      "path": "/api/cron/audit-purge",
+      "schedule": "0 4 * * *"
     }
   ]
 }

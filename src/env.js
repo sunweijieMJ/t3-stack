@@ -31,14 +31,26 @@ export const env = createEnv({
       .enum(['development', 'test', 'production'])
       .default('development'),
 
+    // 生产要求 ≥32 字符：这把密钥用于签名 session cookie，长度不够等于给伪造留门。
+    // 之前只写 z.string()，`BETTER_AUTH_SECRET=abc` 也能过校验并正常启动。
+    // 生成：openssl rand -base64 32
     BETTER_AUTH_SECRET:
       process.env.NODE_ENV === 'production'
-        ? z.string()
+        ? z
+            .string()
+            .min(
+              32,
+              'BETTER_AUTH_SECRET 至少 32 字符（openssl rand -base64 32）',
+            )
         : z.string().optional(),
     BETTER_AUTH_URL:
       process.env.NODE_ENV === 'production' ? z.url() : z.url().optional(),
 
     ADMIN_EMAILS: z.string().optional(),
+
+    // 定时任务鉴权口令（/api/cron/*）。Vercel 上配了它就会自动带
+    // `Authorization: Bearer <值>` 调用 crons；不配则该端点直接 503。
+    CRON_SECRET: z.string().optional(),
 
     // 邮箱 SMTP
     SMTP_HOST: z.string().default('smtp.qq.com'),
@@ -62,9 +74,16 @@ export const env = createEnv({
 
     // 是否信任 X-Real-IP / X-Forwarded-For 头来推断客户端 IP。
     // 仅当请求一定经过受信代理（nginx / CDN）时才能为 true；否则攻击者可伪造 IP 绕过限流。
+    //
+    // 默认值随平台而定，而不是一律 false：
+    //   - Vercel：函数永远跑在 Vercel 边缘代理之后，客户端无法直连，X-Forwarded-For
+    //     由平台改写，伪造不了。这里默认 false 反而是纯粹的坑 —— 全站 /api/* 会挤进
+    //     同一个 'unknown' 限流桶（默认 60 次/分钟），审计日志 IP 恒为 NULL。
+    //   - 其他环境：保持 false。裸跑 Next（无反代）时 header 完全由客户端控制，
+    //     必须由部署者显式确认拓扑后再打开（本仓库的 docker-compose 已设为 true）。
     TRUST_PROXY_HEADERS: z
       .enum(['true', 'false'])
-      .default('false')
+      .default(process.env.VERCEL ? 'true' : 'false')
       .transform((v) => v === 'true'),
 
     // Redis 限流后端：设置后所有 rate-limiter 走 Redis（多实例共享计数）；
@@ -97,6 +116,7 @@ export const env = createEnv({
     BETTER_AUTH_URL:
       stripQuotes(process.env.BETTER_AUTH_URL) || vercelBaseUrl(),
     ADMIN_EMAILS: stripQuotes(process.env.ADMIN_EMAILS),
+    CRON_SECRET: stripQuotes(process.env.CRON_SECRET),
     SMTP_HOST: stripQuotes(process.env.SMTP_HOST),
     SMTP_PORT: stripQuotes(process.env.SMTP_PORT),
     SMTP_USER: stripQuotes(process.env.SMTP_USER),
@@ -128,9 +148,31 @@ export const env = createEnv({
 //   - 否则 SMTP 缺失要等第一个用户点「获取验证码」才在运行时抛错（登录直接不可用）
 //   - OSS 配置缺失要等管理员上传图片才由 requireOssConfig() 抛错
 // 跳过条件：
-//   - SKIP_ENV_VALIDATION：构建期（Dockerfile）与单测，此时本就拿不到真实变量
+//   - SKIP_ENV_VALIDATION：Dockerfile 构建与单测，此时本就拿不到真实变量
 //   - 浏览器环境：env 代理在客户端读取 server 段变量会直接抛错
-if (typeof window === 'undefined' && !process.env.SKIP_ENV_VALIDATION) {
+//   - `next build` 构建期：见下方说明
+//
+// 为什么要放过构建期：SMTP / OSS 都是**纯运行时**依赖，编译产物一个字节都不依赖它们，
+// 但 `next build` 会把 NODE_ENV 置为 production，于是这段检查在构建期也会触发。
+// 后果是「想构建一次产物，先得把邮箱密码交给 CI」——Vercel 上尤其别扭：
+// 一键部署时用户还没配 SMTP，首次构建直接红。CI 只能灌一组假值绕过
+// （见 check-quality.yml），那这道校验在构建期本来也没验到任何真东西。
+// 放过构建、保留启动：`next start` / standalone server.js 拉起时依旧 fail-fast。
+//
+// 判据为什么不用 NEXT_PHASE：Next 16 加载 next.config.js 时还没有设置它（实测为 undefined）。
+// 退回到进程判据 —— next 官方入口脚本 + 子命令 build。构建期的静态生成跑在 worker
+// 子进程里（argv 不同），所以父进程一旦判定就写回 process.env，让 worker 继承。
+const NEXT_BIN_RE = /[\\/]next[\\/]dist[\\/]bin[\\/]next$/;
+const isNextBuild =
+  process.env.__NEXT_BUILD_PHASE === '1' ||
+  (NEXT_BIN_RE.test(process.argv[1] ?? '') && process.argv[2] === 'build');
+if (isNextBuild) process.env.__NEXT_BUILD_PHASE = '1';
+
+if (
+  typeof window === 'undefined' &&
+  !process.env.SKIP_ENV_VALIDATION &&
+  !isNextBuild
+) {
   /** @type {string[]} */
   const missing = [];
 
