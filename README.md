@@ -157,6 +157,22 @@ pnpm dev
 | `BETTER_AUTH_SECRET` | `openssl rand -base64 32` 生成，**至少 32 字符** | 构建期直接失败 |
 | `ADMIN_EMAILS` | 管理员邮箱白名单，不填则没有人能进后台 | 站点能起，但没人能进后台 |
 | `SMTP_USER` / `SMTP_PASS` | 默认登录方式是邮箱验证码，没有 SMTP 就登不进去。<br>若改用 `AUTH_METHOD=email-password` 则可留空 | 构建能过，**启动时报错** |
+| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | **创建第一个账号**，邮箱须同时在 `ADMIN_EMAILS` 里 | 见下方说明 |
+
+### 为什么必须填 `SEED_ADMIN_*`
+
+站点刻意不提供任何公开注册入口，而 Vercel 又没有容器启动钩子，所以初始管理员由
+`scripts/vercel-build.sh` 在构建期创建（Docker 那边对应 `Dockerfile` 的 CMD）。
+
+不填的后果很隐蔽，**不会有任何报错**：表建好了但 `user` 表是空的 → 在登录页点「获取
+验证码」时，better-auth 因 `disableSignUp: true` 对「库里不存在的邮箱」**静默返回 200
+且不发信**（防用户枚举，见 `email-otp/routes.mjs` 的 `shouldSendOTP` 分支）→ 现场表现
+是「接口 200、邮箱永远收不到验证码」，而且进不去后台也就无法用后台去建第一个用户。
+
+`ADMIN_EMAILS` 只决定「谁算管理员」，**不会创建账号**，两者都要配。
+
+脚本幂等，账号已存在时会打印「已存在，跳过创建」，重复部署无副作用，也不会重置密码。
+建号成功后建议删掉 `SEED_ADMIN_PASSWORD`，避免明文密码长期驻留在项目配置里。
 
 SMTP 两项之所以不在构建期拦：它们是纯运行时依赖，编译产物一个字节都不依赖它们。
 一键部署时用户往往还没申请好邮箱授权码，卡在构建期只会让首次部署无谓地红一次。
