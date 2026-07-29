@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { DEFAULT_PRIMARY_COLOR } from '@/constants/frontend-config';
 // reset 仅在 portal 子树生效，避免影响 admin 子树的 AntD 组件默认样式
 import '@unocss/reset/tailwind.css';
 import { PortalFooter } from '@/components/PortalFooter';
@@ -21,7 +22,7 @@ export default async function PortalLayout({
     getFrontendConfig(),
     getDefaultLang(),
   ]);
-  const primaryColor = cfg.basic?.primaryColor || '#ff6b3d';
+  const primaryColor = cfg.basic?.primaryColor || DEFAULT_PRIMARY_COLOR;
   // Header / StickyNav 是客户端组件，读不到服务端配置，所以在这里解析好再按 props 注入。
   // 之前两处都硬编码 'Site'，后台「门户设置」里的站点标题与 Logo 改了没有任何反应。
   const siteName = pickI18nText(cfg.basic?.systemTitle, lang, 'Site');

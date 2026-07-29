@@ -25,7 +25,12 @@ export async function PortalFooter() {
   const footer = cfg.footer ?? {};
   const tagline = footer.tagline || '';
   const address = footer.address || '';
-  const copyright = footer.copyright || '© 2026. All Rights Reserved.';
+  // 年份不能写死：上一版硬编码 '© 2026'，跨年后整站页脚就开始显示过期年份。
+  // 本组件是 Server Component（非 'use client'），取值发生在服务端渲染时，
+  // 不存在客户端时区不一致导致的 hydration mismatch；门户走 ISR（layout 里
+  // revalidate = 60），跨年后最迟一分钟内自动更新。
+  const copyright =
+    footer.copyright || `© ${new Date().getFullYear()}. All Rights Reserved.`;
   const icp = footer.icp || '';
   const icpLink = footer.icpLink || 'https://beian.miit.gov.cn/';
 

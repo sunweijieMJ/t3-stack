@@ -6,8 +6,24 @@ import { useReducedMotion } from 'framer-motion';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import type { Group, Mesh } from 'three';
 
-const GREEN = '#00a852';
 const INK = '#111312';
+const ACCENT_FALLBACK = '#00a852';
+
+/**
+ * three.js 吃不到 CSS 变量，必须在挂载时把 --portal-primary 的计算值读出来喂给材质与灯光。
+ * 否则后台改了主题色，SCSS 部分跟着变、WebGL 场景却永远是绿的。
+ *
+ * 本组件是 `ssr: false` 动态加载的，首帧就在浏览器里，可以同步读 DOM，不存在 hydration 不一致。
+ * 变量挂在 (portal)/layout.tsx 的 .portal-root 上（不是 :root），所以要从那个节点取。
+ */
+function readAccent(): string {
+  if (typeof document === 'undefined') return ACCENT_FALLBACK;
+  const host = document.querySelector('.portal-root') ?? document.body;
+  const value = getComputedStyle(host)
+    .getPropertyValue('--portal-primary')
+    .trim();
+  return value || ACCENT_FALLBACK;
+}
 
 /**
  * KV 主体 —— 一个缓慢自转的「学术核」：
@@ -15,7 +31,7 @@ const INK = '#111312';
  * wireframe 晶格与三道倾斜轨道环。整体只用绿与墨两色，
  * 与参考站「留白 + 单一强调色」的克制一致。
  */
-function AcademicCore({ still }: { still: boolean }) {
+function AcademicCore({ still, accent }: { still: boolean; accent: string }) {
   const core = useRef<Mesh>(null);
   const lattice = useRef<Group>(null);
   const orbits = useRef<Group>(null);
@@ -51,7 +67,7 @@ function AcademicCore({ still }: { still: boolean }) {
           clearcoat={0.6}
           clearcoatRoughness={0.5}
           color="#060b08"
-          emissive={GREEN}
+          emissive={accent}
           emissiveIntensity={0.05}
           metalness={0.75}
           roughness={0.5}
@@ -83,7 +99,7 @@ function AcademicCore({ still }: { still: boolean }) {
             rotation={[x ?? 0, y ?? 0, z ?? 0]}
           >
             <meshBasicMaterial
-              color={i === 1 ? GREEN : '#ffffff'}
+              color={i === 1 ? accent : '#ffffff'}
               opacity={i === 1 ? 0.85 : 0.3}
               transparent
             />
@@ -110,6 +126,8 @@ function ParallaxCamera({ still }: { still: boolean }) {
 export default function Scene() {
   const still = useReducedMotion() ?? false;
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // 惰性初始化：只在首次渲染读一次 DOM，之后主题色变更靠整页重新渲染带过来
+  const [accent] = useState(readAccent);
   // KV 只占首屏一块，而首页很长。默认的 frameloop='always' 会在用户滚到页面
   // 底部之后仍然逐帧渲染 WebGL，纯属白烧电。用 IntersectionObserver 盯住 canvas
   // 本身，离开视口就切到 'demand'（只在 invalidate 时渲染，等于停机）。
@@ -141,8 +159,8 @@ export default function Scene() {
         <fog args={[INK, 6, 15]} attach="fog" />
         <ambientLight intensity={0.22} />
         <directionalLight intensity={1.1} position={[4, 6, 5]} />
-        <pointLight color={GREEN} intensity={14} position={[-5, -2, 3]} />
-        <AcademicCore still={still} />
+        <pointLight color={accent} intensity={14} position={[-5, -2, 3]} />
+        <AcademicCore accent={accent} still={still} />
         <Sparkles
           color="#ffffff"
           count={90}
@@ -153,7 +171,7 @@ export default function Scene() {
           speed={still ? 0 : 0.2}
         />
         <Sparkles
-          color={GREEN}
+          color={accent}
           count={36}
           opacity={0.8}
           scale={[9, 6, 6]}

@@ -17,7 +17,11 @@
 }
 
 /* portal 子树用 UnoCSS reset，会把 button background 设为 transparent；
- * 用 .portal-root scope 把覆盖收敛到 portal，避免影响 admin AntD 按钮 token。 */
+ * 用 .portal-root scope 把覆盖收敛到 portal，避免影响 admin AntD 按钮 token。
+ *
+ * 兜底链接到 --portal-primary（由 (portal)/layout.tsx 注入 basic.primaryColor）
+ * 而不是再写一遍色号：AntD 未启用 CSS 变量模式时 --ant-color-primary 不存在，
+ * 若在这里硬编码，后台改了主题色这一个按钮就会掉队。 */
 .portal-root .ant-btn-primary:not(:disabled) {
-  background-color: var(--ant-color-primary, #ff6b3d);
+  background-color: var(--ant-color-primary, var(--portal-primary, #00a852));
 }

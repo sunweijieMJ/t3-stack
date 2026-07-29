@@ -1,5 +1,13 @@
 import type { FrontendSchema } from '@/lib/frontend-config';
 
+/**
+ * 主题色兜底值。此前门户 layout / antd provider / 登录页各写一份 '#ff6b3d'，
+ * 改一处漏三处；同时首页 SCSS 又硬编码了另一个绿色，配置项等于对门户完全无效。
+ * 现在统一到这一个常量 + 一条 CSS 变量链：
+ *   basic.primaryColor → --portal-primary → 首页 SCSS / 登录页 --accent / antd colorPrimary
+ */
+export const DEFAULT_PRIMARY_COLOR = '#00a852';
+
 export const frontendConfigSchema = {
   basic: {
     type: 'object',
@@ -39,9 +47,9 @@ export const frontendConfigSchema = {
         type: 'string',
         title: '主题色',
         description:
-          '门户与后台主题色，注入到 CSS 变量 --portal-primary 与 antd colorPrimary',
+          '全站强调色，注入到 CSS 变量 --portal-primary 与 antd colorPrimary，门户首页、登录页、后台三处同时生效',
         inputType: 'color',
-        defaultValue: '#ff6b3d',
+        defaultValue: DEFAULT_PRIMARY_COLOR,
       },
     },
   },

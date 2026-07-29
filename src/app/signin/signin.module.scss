@@ -1,0 +1,630 @@
+// 登录页视觉 —— 与门户首页（_home/index.module.scss）同一套设计语言：
+// 墨黑底 + 单一强调色 + 胶片颗粒 + 英文紧排大写字距。
+//
+// 强调色不写死：由 page.tsx 从 basic.primaryColor 读出后以 --accent 注入，
+// 这里所有高亮（描边、光晕、按钮、极光）全部由它派生，改后台主题色即整页跟着变。
+//
+// 注意：/signin 不在 (portal) 路由组内，拿不到那份 @unocss/reset。
+// 所以本文件对用到的原生元素（h1/p/input/button/form）显式重置，不依赖全局 reset。
+
+$ink: #111312;
+$ink-deep: #0a0b0a;
+$ease: cubic-bezier(0.3, 0.26, 0.38, 1);
+
+$font-en: var(--font-roboto), 'Roboto', 'Helvetica Neue', arial, sans-serif;
+$font-cn:
+  var(--font-roboto), 'Roboto', 'PingFang SC', 'Hiragino Sans GB',
+  'Microsoft YaHei', sans-serif;
+
+@mixin label-en {
+  font-family: $font-en;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+// ============ 页面骨架 ============
+
+.page {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: $ink;
+  color: #fff;
+  font-family: $font-cn;
+}
+
+.srOnly {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  width: 1px;
+  height: 1px;
+  white-space: nowrap;
+}
+
+// ============ 左：氛围区 ============
+
+.stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: clamp(32px, 5vw, 72px);
+  isolation: isolate;
+}
+
+// 极光光斑的容器。blur 很大，必须裁掉溢出，否则会糊到右侧表单区。
+.aurora {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      120% 90% at 12% 8%,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      transparent 60%
+    ),
+    linear-gradient(160deg, $ink 0%, $ink-deep 100%);
+}
+
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  will-change: transform;
+}
+
+// 光斑压到 0.5 以下：再亮就会把标题的白字吞掉，对比度不够
+.blobA {
+  top: -16%;
+  left: -12%;
+  width: 42vw;
+  height: 42vw;
+  background: color-mix(in srgb, var(--accent) 46%, transparent);
+  opacity: 0.8;
+}
+
+.blobB {
+  right: -18%;
+  bottom: -22%;
+  width: 40vw;
+  height: 40vw;
+  background: color-mix(in srgb, var(--accent) 30%, #1b3a2b);
+  opacity: 0.55;
+}
+
+.blobC {
+  top: 34%;
+  left: 34%;
+  width: 26vw;
+  height: 26vw;
+  background: color-mix(in srgb, var(--accent) 40%, #123048);
+  opacity: 0.45;
+}
+
+// 细网格：给纯色块一点秩序感，透明度极低，只在边缘可感知
+.grid {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  opacity: 0.14;
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.6) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: radial-gradient(80% 60% at 30% 40%, #000 0%, transparent 75%);
+  pointer-events: none;
+}
+
+// 胶片颗粒：与首页 .noise 同一张噪声图，保持系列感
+.noise {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  opacity: 0.06;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+}
+
+.brand {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  color: #fff;
+  text-decoration: none;
+}
+
+.brandMark {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.brandName {
+  @include label-en;
+
+  color: rgb(255 255 255 / 0.82);
+  transition: color 0.3s $ease;
+
+  .brand:hover & {
+    color: #fff;
+  }
+}
+
+.stageBody {
+  position: relative;
+  z-index: 2;
+  max-width: 15em;
+}
+
+.headline {
+  margin: 0;
+  font-family: $font-en;
+  font-size: clamp(40px, 5.2vw, 76px);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.headlineAccent {
+  display: block;
+  color: var(--accent);
+}
+
+.tagline {
+  margin: 24px 0 0;
+  max-width: 24em;
+  color: rgb(255 255 255 / 0.62);
+  font-size: clamp(13px, 1.1vw, 15px);
+  line-height: 2.1;
+  letter-spacing: 0.09em;
+}
+
+.stageFoot {
+  @include label-en;
+
+  position: relative;
+  z-index: 2;
+  display: flex;
+  gap: 20px;
+  color: rgb(255 255 255 / 0.38);
+}
+
+// 逐字入场：字符本身对读屏无意义，语义由同级 .srOnly 承载。
+// nowrap 是必须的：拆成 inline-block 的单字之间是合法断行点，
+// 不加的话窄容器里 "Welcome" 会被折成 "Welco / me"。
+.split {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.splitChar {
+  display: inline-block;
+  transform-origin: 50% 100%;
+  white-space: pre;
+  will-change: transform, opacity;
+}
+
+// ============ 右：表单区 ============
+
+.formSide {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(28px, 4vw, 64px);
+  background: rgb(255 255 255 / 0.02);
+  border-left: 1px solid rgb(255 255 255 / 0.08);
+  backdrop-filter: blur(2px);
+}
+
+.card {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+}
+
+.cardHead {
+  margin-bottom: 32px;
+}
+
+.eyebrow {
+  @include label-en;
+
+  display: block;
+  margin-bottom: 14px;
+  color: var(--accent);
+}
+
+.title {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: 0.04em;
+}
+
+.subtitle {
+  margin: 10px 0 0;
+  color: rgb(255 255 255 / 0.45);
+  font-size: 13px;
+  line-height: 1.8;
+  letter-spacing: 0.06em;
+}
+
+// ---- 表单元素 ----
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin: 0;
+}
+
+.field {
+  display: block;
+}
+
+.fieldLabel {
+  @include label-en;
+
+  display: block;
+  margin-bottom: 10px;
+  color: rgb(255 255 255 / 0.5);
+  transition: color 0.3s $ease;
+}
+
+.fieldFocused .fieldLabel {
+  color: var(--accent);
+}
+
+.inputWrap {
+  position: relative;
+}
+
+.input {
+  display: block;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 14px 2px;
+  width: 100%;
+  outline: none;
+  border: none;
+  border-bottom: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: 0;
+  background: transparent;
+  color: #fff;
+  font-family: inherit;
+  font-size: 15px;
+  letter-spacing: 0.03em;
+  transition: border-color 0.3s $ease;
+
+  &::placeholder {
+    color: rgb(255 255 255 / 0.25);
+  }
+
+  // 浏览器自动填充会强行刷上浅色背景，只能用超长 inset shadow 盖住
+  &:-webkit-autofill {
+    box-shadow: inset 0 0 0 1000px $ink;
+    -webkit-text-fill-color: #fff;
+    caret-color: #fff;
+    transition: background-color 600000s 0s;
+  }
+}
+
+// 聚焦时从中间向两端展开的强调色下划线
+.inputUnderline {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  transform-origin: 50% 50%;
+  width: 100%;
+  height: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 60%, transparent);
+  pointer-events: none;
+}
+
+.passwordToggle {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  margin: 0;
+  padding: 4px 2px;
+  border: none;
+  background: none;
+  color: rgb(255 255 255 / 0.4);
+  font-family: $font-en;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.25s $ease;
+
+  &:hover {
+    color: var(--accent);
+  }
+}
+
+// ---- 验证码输入 ----
+
+.otpRow {
+  display: flex;
+  gap: 10px;
+}
+
+.otpBox {
+  box-sizing: border-box;
+  padding: 0;
+  width: 100%;
+  height: 56px;
+  outline: none;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.03);
+  color: #fff;
+  font-family: $font-en;
+  font-size: 22px;
+  font-weight: 500;
+  text-align: center;
+  transition:
+    border-color 0.25s $ease,
+    background 0.25s $ease,
+    box-shadow 0.25s $ease;
+
+  &:focus {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+}
+
+.otpBoxFilled {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.otpHint {
+  margin: 0;
+  color: rgb(255 255 255 / 0.45);
+  font-size: 13px;
+  line-height: 1.7;
+  letter-spacing: 0.04em;
+}
+
+.otpHintMail {
+  color: #fff;
+}
+
+// ---- 按钮 ----
+
+.submit {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  overflow: hidden;
+  margin: 4px 0 0;
+  padding: 15px 20px;
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #0b0b0b;
+  font-family: $font-en;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    filter 0.25s $ease,
+    box-shadow 0.25s $ease;
+
+  &:hover:not(:disabled) {
+    box-shadow: 0 10px 30px color-mix(in srgb, var(--accent) 32%, transparent);
+    filter: brightness(1.08);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+}
+
+// hover 时扫过按钮的高光
+.submitSheen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    rgb(255 255 255 / 0.45),
+    transparent
+  );
+  pointer-events: none;
+}
+
+.spinner {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgb(0 0 0 / 0.25);
+  border-top-color: #0b0b0b;
+  border-radius: 50%;
+}
+
+.ghost {
+  display: block;
+  margin: 0;
+  padding: 10px;
+  width: 100%;
+  border: none;
+  background: none;
+  color: rgb(255 255 255 / 0.42);
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: color 0.25s $ease;
+
+  &:hover:not(:disabled) {
+    color: var(--accent);
+  }
+
+  &:disabled {
+    color: rgb(255 255 255 / 0.25);
+    cursor: not-allowed;
+  }
+}
+
+// ---- 错误提示 ----
+
+.alert {
+  display: flex;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid rgb(255 90 90 / 0.28);
+  border-radius: 10px;
+  background: rgb(255 60 60 / 0.08);
+  color: #ffb4b4;
+  font-size: 13px;
+  line-height: 1.6;
+  letter-spacing: 0.03em;
+}
+
+.alertInner {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.alertDot {
+  flex-shrink: 0;
+  margin-top: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff6b6b;
+}
+
+// ---- 成功遮罩 ----
+
+.success {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  inset: -24px;
+  border-radius: 16px;
+  background: color-mix(in srgb, $ink 88%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.successRing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  border-radius: 50%;
+  color: var(--accent);
+}
+
+.successText {
+  @include label-en;
+
+  margin: 0;
+  color: rgb(255 255 255 / 0.7);
+}
+
+// ============ 响应式 ============
+
+// 竖屏 / 窄屏：氛围区退化为顶部横幅，表单占据主要空间
+@media (width <= 900px) {
+  .page {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .stage {
+    gap: 28px;
+    padding: 32px 24px 40px;
+  }
+
+  .stageBody {
+    max-width: none;
+  }
+
+  .headline {
+    font-size: clamp(34px, 11vw, 54px);
+  }
+
+  .tagline {
+    margin-top: 16px;
+  }
+
+  .stageFoot {
+    display: none;
+  }
+
+  // 窄屏改为顶部对齐：竖排下垂直居中会在氛围区和表单之间留出一大片空白
+  .formSide {
+    align-items: flex-start;
+    padding: 40px 24px 56px;
+    border-top: 1px solid rgb(255 255 255 / 0.08);
+    border-left: none;
+  }
+
+  .blob {
+    filter: blur(56px);
+  }
+}
+
+@media (width <= 420px) {
+  .otpRow {
+    gap: 6px;
+  }
+
+  .otpBox {
+    height: 50px;
+    font-size: 19px;
+  }
+}
+
+// 尊重系统「减少动态效果」：framer-motion 侧已用 useReducedMotion 关掉位移动画，
+// 这里补掉纯 CSS 的 transition，避免残留的颜色/阴影渐变。
+@media (prefers-reduced-motion: reduce) {
+  .page *,
+  .page *::before,
+  .page *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

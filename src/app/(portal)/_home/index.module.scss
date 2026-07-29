@@ -3,7 +3,11 @@
 // 中文疏排（lh 2 / 字距 .1em+），章节以 sticky 整屏推进。
 
 // ============ 设计 token ============
-$green: #00a852;
+// 跟随 basic.primaryColor —— (portal)/layout.tsx 把它注入为 --portal-primary。
+// 兜底值保留原绿，独立打开本文件预览或变量缺失时视觉不变。
+// 注意：$green 全项目只做纯色值使用，没有进过 darken()/rgba() 等 SCSS 颜色函数，
+// 所以换成 CSS 变量不会破坏编译；后续若要做颜色运算，请改用 color-mix()。
+$green: var(--portal-primary, #00a852);
 $green-deep: #133221;
 $ink: #111312;
 $paper: #fff;

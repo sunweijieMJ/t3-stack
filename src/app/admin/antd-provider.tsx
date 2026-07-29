@@ -3,6 +3,7 @@
 import { App, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { useMemo } from 'react';
+import { DEFAULT_PRIMARY_COLOR } from '@/constants/frontend-config';
 import { useFrontendConfig } from '@/hooks/useFrontendConfig';
 
 export function AdminAntdProvider({ children }: { children: React.ReactNode }) {
@@ -11,7 +12,7 @@ export function AdminAntdProvider({ children }: { children: React.ReactNode }) {
     () => ({
       token: {
         borderRadius: 8,
-        colorPrimary: cfg.basic?.primaryColor || '#ff6b3d',
+        colorPrimary: cfg.basic?.primaryColor || DEFAULT_PRIMARY_COLOR,
       },
     }),
     [cfg.basic?.primaryColor],

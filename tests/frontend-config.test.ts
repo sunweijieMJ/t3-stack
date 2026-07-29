@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { frontendConfigSchema } from '@/constants/frontend-config';
+import {
+  DEFAULT_PRIMARY_COLOR,
+  frontendConfigSchema,
+} from '@/constants/frontend-config';
 import {
   buildFrontendConfigZod,
   collectAssetUrls,
@@ -81,7 +84,9 @@ describe('extractDefaults', () => {
 describe('mergeConfig', () => {
   it('空对象返回完整默认配置', () => {
     const cfg = mergeConfig({});
-    expect(cfg.basic?.primaryColor).toBe('#ff6b3d');
+    // 断言对齐常量而不是写死色号：这里要验的是「schema 默认值能透传到 mergeConfig」，
+    // 不是某个具体品牌色。写死的话，每次调主题色都会假阳性地挂一条测试。
+    expect(cfg.basic?.primaryColor).toBe(DEFAULT_PRIMARY_COLOR);
     expect(cfg.footer?.icpLink).toBe('https://beian.miit.gov.cn/');
   });
 
@@ -99,7 +104,7 @@ describe('mergeConfig', () => {
 
   it('不修改 defaultFrontendConfig 本身', () => {
     mergeConfig({ basic: { primaryColor: '#123456' } } as never);
-    expect(mergeConfig({}).basic?.primaryColor).toBe('#ff6b3d');
+    expect(mergeConfig({}).basic?.primaryColor).toBe(DEFAULT_PRIMARY_COLOR);
   });
 });
 
