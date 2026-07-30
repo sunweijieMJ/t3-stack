@@ -46,6 +46,12 @@ jobs:
         env:
           SKIP_ENV_VALIDATION: 1
 
+      # .cspell.json 的 files 里那条 "*.{js,mjs,ts}" 是为这一步加的：只圈
+      # src / tests / e2e 的话，根目录的 migrate.mjs 与各 *.config.ts 一个都查不到。
+      # 而 pre-commit 的 lint-staged 是按暂存文件逐个调 cspell 的，不受该 glob 约束
+      # —— 于是本地比 CI 严，实测被钩子拦下过 migrate.mjs 里的词而这一步全绿，
+      # 与本文件开头「本地过 = CI 过」的承诺相悖，且方向还反着。
+      # （scripts/ 仍由 ignorePaths 排除，那是 husky 的胶水脚本。）
       - name: Spell check
         run: pnpm spell-check
 
