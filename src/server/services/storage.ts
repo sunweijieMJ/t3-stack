@@ -106,18 +106,9 @@ export async function deleteFile(
   }
 }
 
-/**
- * 旧 URL 与新 URL 不同时异步删除旧文件。fire-and-forget，不阻塞业务。
- * 用于 adminUpdate 场景：替换封面图时清理被替换的旧图。
- */
-export function deleteFileIfChanged(
-  oldUrl: string | null | undefined,
-  newUrl: string | null | undefined,
-): void {
-  if (oldUrl && oldUrl !== newUrl) {
-    void deleteFile(oldUrl);
-  }
-}
+// 这里曾有 deleteFileIfChanged（"替换封面图时清理旧图"），零调用点：
+// 唯一的孤儿文件回收路径是 routers/page.ts 的 purgeOrphanAssets，它按 schema
+// 对比新旧配置的全部 image/file 字段，比逐字段调用可靠得多。已移除。
 
 async function uploadToOss(
   key: string,

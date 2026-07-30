@@ -5,7 +5,6 @@ import '@unocss/reset/tailwind.css';
 import { PortalFooter } from '@/components/PortalFooter';
 import { PortalHeader } from '@/components/PortalHeader';
 import { PortalStickyNav } from '@/components/PortalStickyNav';
-import { PortalLayoutProvider } from '@/context/portal-layout-context';
 import { pickI18nText } from '@/lib/i18n-text';
 import { getDefaultLang, getFrontendConfig } from '@/server/services/config';
 
@@ -29,21 +28,19 @@ export default async function PortalLayout({
   const logoImage = cfg.basic?.logoImage || undefined;
 
   return (
-    <PortalLayoutProvider>
-      <div
-        className="portal-root"
-        style={
-          {
-            '--portal-primary': primaryColor,
-            '--ant-color-primary': primaryColor,
-          } as CSSProperties
-        }
-      >
-        <PortalHeader logoImage={logoImage} siteName={siteName} />
-        <main>{children}</main>
-        <PortalStickyNav siteName={siteName} />
-        <PortalFooter />
-      </div>
-    </PortalLayoutProvider>
+    <div
+      className="portal-root"
+      style={
+        {
+          '--portal-primary': primaryColor,
+          '--ant-color-primary': primaryColor,
+        } as CSSProperties
+      }
+    >
+      <PortalHeader logoImage={logoImage} siteName={siteName} />
+      <main>{children}</main>
+      <PortalStickyNav siteName={siteName} />
+      <PortalFooter />
+    </div>
   );
 }

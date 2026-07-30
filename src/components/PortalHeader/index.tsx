@@ -1,11 +1,7 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { usePortalLayout } from '@/context/portal-layout-context';
 import styles from './index.module.scss';
-
-const UTILITY_LINKS: { label: string; href: string }[] = [];
 
 // 与 index.module.scss 中 .header 的 height 保持一致
 const HEADER_H = 60;
@@ -18,7 +14,6 @@ interface PortalHeaderProps {
 }
 
 export function PortalHeader({ siteName, logoImage }: PortalHeaderProps) {
-  const { layoutVisible } = usePortalLayout();
   // 区块用 data-portal-theme 声明自身明暗，header 据此反色（透明浮在内容上）。
   // 未声明的页面沿用 dark（白字），与深色首屏一致。
   const [tone, setTone] = useState<'dark' | 'light'>('dark');
@@ -57,8 +52,6 @@ export function PortalHeader({ siteName, logoImage }: PortalHeaderProps) {
     };
   }, []);
 
-  if (!layoutVisible.header) return null;
-
   return (
     <div
       className={`${styles.header} ${tone === 'light' ? styles.headerLight : ''}`}
@@ -70,12 +63,9 @@ export function PortalHeader({ siteName, logoImage }: PortalHeaderProps) {
           siteName
         )}
       </span>
+      {/* 右侧功能区：目前门户没有任何对外入口，保留容器与下面的登录/登出实现，
+          将来要放导航或登录按钮时直接往里填。 */}
       <div className={styles.menu}>
-        {UTILITY_LINKS.map((link) => (
-          <Link className={styles.link} href={link.href} key={link.label}>
-            {link.label}
-          </Link>
-        ))}
         {/* {session?.user ? (
           <button
             className={styles.authBtn}

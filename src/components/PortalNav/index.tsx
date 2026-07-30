@@ -3,8 +3,6 @@
 import Link from 'next/link';
 import styles from './index.module.scss';
 
-const NAV_LINKS: { label: string; href: string }[] = [];
-
 interface PortalNavProps {
   className?: string;
   /** 站点名，来自 basic.systemTitle（由 portal layout 在服务端解析后注入） */
@@ -17,13 +15,8 @@ export function PortalNav({ className, siteName }: PortalNavProps) {
       <Link className={styles.logoLink} href="/">
         {siteName}
       </Link>
-      <nav className={styles.navList}>
-        {NAV_LINKS.map((link) => (
-          <Link className={styles.navItem} href={link.href} key={link.label}>
-            {link.label}
-          </Link>
-        ))}
-      </nav>
+      {/* 导航项列表暂时为空（门户只有首页一个页面），故不渲染 <nav>。
+          加页面时在这里放 .navList / .navItem，样式已在 scss 里备好。 */}
     </div>
   );
 }
