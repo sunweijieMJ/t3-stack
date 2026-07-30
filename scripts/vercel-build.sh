@@ -13,11 +13,13 @@
 # 只在 production 环境迁移：预览部署（VERCEL_ENV=preview）常常与生产共用
 # 同一个 DATABASE_URL，若不加这道判断，任何一个 PR 的预览构建都会去改生产库结构。
 #
-# migrate.mjs 本身是幂等的（按 __drizzle_migrations 表比对 hash 增量执行），
-# 重复构建不会重复应用；DATABASE_URL 缺失时它会打印提示并正常退出，不阻断构建。
+# migrate.mjs 本身是幂等的：它直接调用 drizzle 官方 migrator，与 `pnpm db:migrate`
+# 共用 drizzle.__drizzle_migrations 这一张账本，重复构建不会重复应用。
+# DATABASE_URL 缺失时它会打印提示并正常退出，不阻断构建。
 #
 # 不想要构建期自动迁移，把下面整个 if 块删掉，改为发版前手动执行：
 #   DATABASE_URL='<生产连接串>' pnpm db:migrate
+# 两条路径记同一本账，手动跑过之后再走构建期迁移不会冲突（旧版本会 42P07 报错）。
 
 set -e
 

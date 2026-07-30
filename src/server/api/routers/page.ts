@@ -20,6 +20,18 @@ import { adminProcedure, createTRPCRouter } from '../trpc';
 const frontendConfigInput = buildFrontendConfigZod(frontendConfigSchema);
 
 /**
+ * PG 唯一约束冲突（SQLSTATE 23505）。postgres.js 把服务端错误码放在 err.code 上，
+ * 但抛出的不一定是 Error 实例，所以这里按结构而非 instanceof 判断。
+ */
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: unknown }).code === '23505'
+  );
+}
+
+/**
  * 删除「旧配置引用、新配置不再引用」的上传文件。
  * 不 await：清理失败只会留下一个孤儿文件（等同于改动前的行为），
  * 不该因此让保存配置这个主流程失败。
@@ -110,10 +122,20 @@ export const pageRouter = createTRPCRouter({
           .returning({ updatedAt: systemConfig.updatedAt });
         revalidateTag(FRONTEND_CONFIG_TAG, { expire: 0 });
         return { value: input.value, updatedAt: inserted[0]?.updatedAt ?? now };
-      } catch {
+      } catch (err) {
+        // 只有主键冲突（23505）才是「别人抢先插了」。裸 catch 会把连接中断、
+        // jsonb 过大、权限不足统统报成「被其他管理员修改」，而前端收到 CONFLICT
+        // 会去 refetch 重试 —— 真实故障被掩盖成一个无限重试的假冲突。
+        if (isUniqueViolation(err)) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: '配置已被其他管理员修改，请刷新后再保存',
+          });
+        }
+        console.error('[page.saveFrontendConfig] 首次写入失败:', err);
         throw new TRPCError({
-          code: 'CONFLICT',
-          message: '配置已被其他管理员修改，请刷新后再保存',
+          code: 'INTERNAL_SERVER_ERROR',
+          message: '保存失败，请稍后重试',
         });
       }
     }),

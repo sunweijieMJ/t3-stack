@@ -16,7 +16,14 @@ const KEY_LAST_PURGE = 'audit_log_last_purge_at';
 
 const DEFAULT_RETENTION_DAYS = 90;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const PURGE_INTERVAL_MS = DAY_MS; // 距上次清理 ≥ 24h 才会再次触发
+// 距上次清理 ≥ 23h 才会再次触发。
+//
+// 不能取整 24h：lastPurgeAt 是在 DELETE 跑完之后才写的，必然晚于触发时刻若干秒，
+// 而 vercel.json 的 cron 是精确的 `0 4 * * *`。于是次日 04:00 的
+// `now - last` 恒为 24h 减去那几秒，卡在阈值下方被判为「太频繁」直接返回 ——
+// 实际效果是每两天才真正清理一次，且 cron 每次都返回 200，看不出任何异常。
+// 留 1h 余量，既躲开这个边界，又不至于让「每天最多一次」的语义失真。
+const PURGE_INTERVAL_MS = 23 * 60 * 60 * 1000;
 
 export type AuditPurgeConfig = {
   enabled: boolean;

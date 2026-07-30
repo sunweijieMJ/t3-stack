@@ -85,6 +85,10 @@ export const adminRouter = createTRPCRouter({
             message: '该邮箱已被注册',
           });
         }
+        // 必须落日志：下面会把原始错误替换成「创建用户失败」，而审计中间件记录的
+        // 是替换之后的 TRPCError.message。不在这里打印，DB 不可达 / better-auth 配置
+        // 错误 / 密码策略不过这些真实原因就彻底消失了，线上只剩一句没有信息量的提示。
+        console.error('[sys.createUser] 创建用户失败:', err);
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: '创建用户失败',

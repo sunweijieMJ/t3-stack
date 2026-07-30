@@ -100,11 +100,22 @@ export async function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
+// 只匹配真正需要它的两类路径。
+//
+// 原来第一条是 '/((?!_next|_vercel|.*\\..*).*)' —— 匹配所有不含点号的路径，
+// 也就是把门户首页（构建产物里是 ○ Static）也算进来了。而本文件顶部就 import 了
+// better-auth，整条 drizzle + postgres 依赖链都会被打进 middleware bundle：
+// 每一次静态首页访问都要先唤醒这个 Node 函数，Serverless 上还各带一次冷启动。
+// 首页既不需要限流（不是 /api/）也不需要登录态，这笔开销是纯浪费。
+//
+// 收窄后 /admin/* 的路由守卫与 /api/* 的限流都不受影响（原来另外两条
+// '/api/trpc/:path*'、'/api/upload' 本就被 '/api/:path*' 覆盖，属于冗余）。
+// 注意：/api/health 仍会进 proxy，由函数开头的早退分支豁免限流。
+// 单列一条 '/admin' 是有意的冗余：Next 16 编译出的 '/admin/:path*' 正则里
+// 路径段部分是 `(?:\/(...))?`（见构建产物 functions-config-manifest.json），
+// 确实覆盖了零段的裸 /admin。但这依赖 path-to-regexp 的量词语义，升级时静默变化
+// 的话，后台首页会直接绕过路由守卫 —— admin/layout.tsx 那层兜底拿不到 pathname，
+// 跳登录页时会丢掉 callbackUrl。多一条正则的代价可以忽略，留着。
 export const config = {
-  matcher: [
-    '/((?!_next|_vercel|.*\\..*).*)',
-    '/api/auth/:path*',
-    '/api/trpc/:path*',
-    '/api/upload',
-  ],
+  matcher: ['/admin', '/admin/:path*', '/api/:path*'],
 };

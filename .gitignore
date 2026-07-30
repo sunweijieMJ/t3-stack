@@ -54,3 +54,4 @@ test-results/
 # docker build artifacts
 seed.mjs
 seed-admin.mjs
+migrate.dist.mjs

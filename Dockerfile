@@ -37,6 +37,16 @@ RUN pnpm exec esbuild scripts/seed-admin.ts \
     --external:postgres \
     --tsconfig=tsconfig.json
 
+# migrate.mjs 依赖 drizzle-orm 的官方 migrator（与 `pnpm db:migrate` 共用同一张
+# 迁移账本，见该文件顶部说明），而 runner 阶段只拷了 node_modules/postgres。
+# 与其为它再拷一个 node_modules 子树，不如照 seed 脚本的老办法 bundle 掉：
+# drizzle-orm 本身零运行时依赖，打进来约 190KB。postgres 继续保持 external，
+# 因为 seed-admin.mjs 也用它，runner 里那份是共用的。
+RUN pnpm exec esbuild migrate.mjs \
+    --bundle --platform=node --format=esm \
+    --outfile=migrate.dist.mjs \
+    --external:postgres
+
 ##### NGINX - serve 静态文件 + 反代 Next.js
 FROM nginx:alpine AS nginx
 
@@ -65,7 +75,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/postgres ./node_modules/postgres
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
-COPY --from=builder --chown=nextjs:nodejs /app/migrate.mjs ./migrate.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/migrate.dist.mjs ./migrate.dist.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/seed-admin.mjs ./seed-admin.mjs
 
 # 必须预创建 public/uploads 并归属 nextjs（放在所有 COPY 之后，避免属主被覆盖）：
@@ -84,4 +94,4 @@ ENV HOSTNAME="0.0.0.0"
 
 # 启动顺序：迁移（DATABASE_URL 由 env_file 提供）→ 可选管理员 seed → server
 # 用 set -e 保证任一步失败立刻退容器（让 compose 的 on-failure 介入而不是带病运行）
-CMD ["sh", "-c", "set -e; node migrate.mjs; if [ -n \"$SEED_ADMIN_EMAIL\" ]; then node seed-admin.mjs; fi; exec node server.js"]
+CMD ["sh", "-c", "set -e; node migrate.dist.mjs; if [ -n \"$SEED_ADMIN_EMAIL\" ]; then node seed-admin.mjs; fi; exec node server.js"]

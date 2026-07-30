@@ -16,6 +16,10 @@
   "words": [
     "OOM",
     "SSG",
+    "SQLSTATE",
+    "trgm",
+    "Millis",
+    "regclass",
     "TOCTOU",
     "BCP",
     "frameloop",

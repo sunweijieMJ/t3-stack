@@ -232,6 +232,15 @@ Nginx 镜像必须由本仓库的 `--target nginx` 构建：它内含 `nginx.con
 生产环境默认监听 `HOST_PORT`（默认 `80`，见 `.env.example` 与 `docker-compose.yml`），
 通过 Nginx 反向代理到应用容器。
 
-数据库迁移**无需手动执行**：容器启动命令里已包含 `node migrate.mjs`，每次部署会自动
+数据库迁移**无需手动执行**：容器启动命令里已包含 `node migrate.dist.mjs`
+（`migrate.mjs` 的 esbuild 产物，runner 阶段没有完整 node_modules），每次部署会自动
 按 `drizzle/meta/_journal.json` 增量应用未执行的迁移，失败则直接退出容器（`set -e`）。
 本地开发才需要手动跑 `pnpm db:migrate`。
+
+两条路径**记同一本账**：`migrate.mjs` 直接调用 drizzle 官方 migrator，与 `pnpm db:migrate`
+共用 `drizzle.__drizzle_migrations` 表和同一套内容 hash。所以「本地/发版前手动迁移过的库」
+再交给容器或 Vercel 构建期自动迁移不会冲突。
+
+> 从旧版本升级：旧的 `migrate.mjs` 自己在 `public.__drizzle_migrations` 记账，与官方账本
+> 互不相认。新脚本启动时会检测到旧表并把已应用的记录一次性搬进官方账本（日志里会打印
+> 「已从旧账本 … 接管 N 条记录」），旧表保留不删以便核对。这一步是自动的，无需人工介入。
