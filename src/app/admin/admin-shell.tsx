@@ -16,37 +16,32 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useFrontendConfig } from '@/hooks/useFrontendConfig';
+import { visibleAdminMenu } from '@/lib/admin-menu';
 import { authClient } from '@/lib/auth-client';
 import { pickI18nText, resolveSiteLang } from '@/lib/i18n-text';
+import type { Role } from '@/lib/rbac';
 
 const SITE_NAME_FALLBACK = 'Site';
 
 const { Sider, Content, Header } = Layout;
 
-const MENU_ITEMS: MenuProps['items'] = [
-  {
-    key: '/admin/users',
-    icon: <TeamOutlined />,
-    label: '用户管理',
-  },
-  {
-    key: '/admin/content',
-    icon: <FileTextOutlined />,
-    label: '内容管理',
-  },
-  {
-    key: '/admin/audit-logs',
-    icon: <HistoryOutlined />,
-    label: '审计日志',
-  },
-  {
-    key: '/admin/setting',
-    icon: <SettingOutlined />,
-    label: '门户设置',
-  },
-];
+// 图标与菜单定义分离：定义在 lib/admin-menu（纯逻辑、可测试、与鉴权共用同一份
+// 权限点），这里只补图标。新增菜单请改那边，否则会漏掉权限绑定。
+const MENU_ICONS: Record<string, React.ReactNode> = {
+  '/admin/users': <TeamOutlined />,
+  '/admin/content': <FileTextOutlined />,
+  '/admin/audit-logs': <HistoryOutlined />,
+  '/admin/setting': <SettingOutlined />,
+};
 
-export function AdminShell({ children }: { children: React.ReactNode }) {
+export function AdminShell({
+  children,
+  role,
+}: {
+  children: React.ReactNode;
+  /** 由 layout 在服务端解析后注入，见那边的说明 */
+  role: Role;
+}) {
   const { modal } = App.useApp();
   const pathname = usePathname();
   const router = useRouter();
@@ -64,6 +59,14 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const {
     token: { colorBgContainer },
   } = theme.useToken();
+
+  // 只渲染当前角色有权限的菜单。不过滤的话，editor 会看到四个菜单却只有
+  // 「内容管理」能用，另外三个点进去全是 403。
+  const menuItems: MenuProps['items'] = visibleAdminMenu(role).map((item) => ({
+    key: item.key,
+    icon: MENU_ICONS[item.key],
+    label: item.label,
+  }));
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -109,7 +112,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           {/* 菜单 */}
           <div style={{ flex: 1, overflowY: 'auto' }}>
             <Menu
-              items={MENU_ITEMS}
+              items={menuItems}
               mode="inline"
               onClick={({ key }) => router.push(key)}
               selectedKeys={[pathname]}
