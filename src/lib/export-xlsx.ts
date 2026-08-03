@@ -130,5 +130,8 @@ export async function exportToXlsx<T>({
   a.href = url;
   a.download = `${filename}_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`;
   a.click();
-  URL.revokeObjectURL(url);
+  // 不能紧跟着 click() 同步 revoke：部分浏览器（Firefox / Safari）在 click 返回时
+  // 还没真正开始读这个 blob，URL 一撤销就下载到一个空文件或直接失败。
+  // 挪到下一个宏任务，等下载线程接手之后再释放。
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

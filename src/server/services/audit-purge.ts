@@ -80,7 +80,8 @@ export async function setAuditPurgeConfig(input: {
 }
 
 /**
- * 懒触发清理：距上次清理 ≥ 24h 才执行一次，失败仅记日志，不影响调用方。
+ * 懒触发清理：距上次清理 ≥ PURGE_INTERVAL_MS（23h）才执行一次，失败仅记日志，
+ * 不影响调用方。阈值取 23h 而非整 24h 的原因见该常量处的说明。
  * 通过 pg_try_advisory_xact_lock 确保多实例下只有一个进程实际执行 DELETE。
  */
 export async function maybePurgeAuditLogs(): Promise<void> {
