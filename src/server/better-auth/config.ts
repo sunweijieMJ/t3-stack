@@ -5,6 +5,7 @@ import { emailOTP } from 'better-auth/plugins';
 
 import { env } from '@/env';
 import { parseAuthMethod } from '@/lib/auth-methods';
+import { DEFAULT_ROLE } from '@/lib/rbac';
 import { db } from '@/server/db';
 import { account, session, user, verification } from '@/server/db/auth-schema';
 import { sendEmailOtp } from '@/server/services/email';
@@ -59,6 +60,22 @@ export const auth = betterAuth({
   // src/app/api/auth/[...all]/route.ts 的 HTTP 层拦截 /sign-up/email，
   // 不影响服务端直接调用 auth.api.signUpEmail()。
   emailAndPassword: { enabled: true },
+  // 把 role 带进 session，让 adminProcedure / 路由守卫不必为每次鉴权多查一次库
+  // （session 还有 cookieCache，实际上连读 session 都不查库）。
+  //
+  // input: false 是安全要件，不能省：它禁止 role 从请求体进入。开着的话
+  // /sign-up/email 与 auth.api.signUpEmail() 都会接受调用方传来的 role，
+  // 任何人注册时带上 role='admin' 即可直接拿到后台全部权限。
+  user: {
+    additionalFields: {
+      role: {
+        type: 'string',
+        required: false,
+        defaultValue: DEFAULT_ROLE,
+        input: false,
+      },
+    },
+  },
   session: {
     expiresIn: 60 * 60, // 1 小时过期
     updateAge: 5 * 60, // 活跃用户每 5 分钟自动续期

@@ -8,7 +8,7 @@ import { adminProcedure, createTRPCRouter } from '@/server/api/trpc';
 import { auth } from '@/server/better-auth';
 import { user } from '@/server/db/auth-schema';
 import { adminAuditLog } from '@/server/db/schema';
-import { isAdminEmail } from '@/server/services/admin-check';
+import { getUserRole } from '@/server/services/admin-check';
 import {
   getAuditPurgeConfig,
   maybePurgeAuditLogs,
@@ -102,13 +102,20 @@ export const adminRouter = createTRPCRouter({
         id: user.id,
         name: user.name,
         email: user.email,
+        role: user.role,
         createdAt: user.createdAt,
       })
       .from(user)
       .orderBy(desc(user.createdAt));
-    // isAdmin 在服务端逐行算好：isAdminEmail 是 server-only，而且 ADMIN_EMAILS
-    // 白名单本身也不该整份下发给客户端。前端只用它来提示「你正在删除一个管理员账号」。
-    return rows.map((r) => ({ ...r, isAdmin: isAdminEmail(r.email) }));
+    // role 在服务端逐行归一：getUserRole 是 server-only（要读 ADMIN_EMAILS），
+    // 而白名单本身也不该整份下发给客户端。这里回传的是**合并白名单之后**的
+    // 有效角色，因此列表里显示的就是该用户实际拥有的权限，而不是库里那个
+    // 可能被白名单覆盖的原始值。
+    // isAdmin 保留：前端用它提示「你正在删除一个管理员账号」。
+    return rows.map((r) => {
+      const role = getUserRole(r);
+      return { ...r, role, isAdmin: role === 'admin' };
+    });
   }),
 
   deleteUser: adminProcedure
@@ -123,25 +130,31 @@ export const adminRouter = createTRPCRouter({
 
       // 不能把最后一个管理员账号删掉。
       // 「不能删自己」只挡住了最直接的一种自锁，两个管理员互删仍然能把后台锁死：
-      // A 删 B、B 删 A，最后谁都进不去（管理员身份取决于 ADMIN_EMAILS 白名单里的
-      // 邮箱在 user 表里**有对应账号**，账号没了就登不上）。
+      // A 删 B、B 删 A，最后谁都进不去 —— 无论管理员身份来自 ADMIN_EMAILS 白名单
+      // 还是 user.role，前提都是该邮箱在 user 表里**有对应账号**，账号没了就登不上。
       // 这里在删之前数一遍剩余的管理员账号，只剩一个就拒绝。
+      // 统计口径必须走 getUserRole 而非只看 role 列：白名单里的账号即使库里
+      // 写着 'user' 也是管理员，漏算会把「删掉最后一个管理员」放行。
       const [target] = await ctx.db
-        .select({ email: user.email })
+        .select({ email: user.email, role: user.role })
         .from(user)
         .where(eq(user.id, input.userId))
         .limit(1);
       if (!target) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '用户不存在' });
       }
-      if (isAdminEmail(target.email)) {
-        const rows = await ctx.db.select({ email: user.email }).from(user);
-        const adminCount = rows.filter((r) => isAdminEmail(r.email)).length;
+      if (getUserRole(target) === 'admin') {
+        const rows = await ctx.db
+          .select({ email: user.email, role: user.role })
+          .from(user);
+        const adminCount = rows.filter(
+          (r) => getUserRole(r) === 'admin',
+        ).length;
         if (adminCount <= 1) {
           throw new TRPCError({
             code: 'FORBIDDEN',
             message:
-              '这是最后一个管理员账号，删除后将无人能进入后台。请先创建另一个管理员账号（邮箱需在 ADMIN_EMAILS 白名单中）。',
+              '这是最后一个管理员账号，删除后将无人能进入后台。请先创建另一个管理员账号（把角色设为 admin，或把邮箱加入 ADMIN_EMAILS 白名单）。',
           });
         }
       }

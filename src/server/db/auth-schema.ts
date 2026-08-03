@@ -14,6 +14,12 @@ export const user = pgTable('user', {
   email: text('email').unique(),
   emailVerified: boolean('email_verified').default(false),
   image: text('image'),
+  // 角色。存文本而非 PG enum：加角色时 enum 要走 ALTER TYPE 迁移，而文本列
+  // 只需改 src/lib/rbac.ts 的 ROLES。合法性由 normalizeRole 在读取侧兜底，
+  // 脏值一律回落到权限最小的角色，不会意外提权。
+  // 默认 'user' 而非 'admin'：存量用户执行迁移后全部落到最小权限，
+  // 后台入口仍由 ADMIN_EMAILS 白名单保底（见 lib/rbac.ts 的 resolveRole）。
+  role: text('role').notNull().default('user'),
   createdAt: timestamp('created_at')
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),

@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { auth } from '@/server/better-auth';
-import { isAdminEmail } from '@/server/services/admin-check';
+import { userCan } from '@/server/services/admin-check';
 import { getClientIp } from '@/server/services/get-client-ip';
 import {
   authIpLimiter,
@@ -92,7 +92,7 @@ export async function proxy(request: NextRequest) {
       return NextResponse.redirect(signinUrl);
     }
 
-    if (!isAdminEmail(session.user.email)) {
+    if (!userCan(session.user, 'admin.access')) {
       return NextResponse.redirect(new URL('/', request.url));
     }
   }

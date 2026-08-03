@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid';
 import { NextResponse } from 'next/server';
 
 import { auth } from '@/server/better-auth';
-import { isAdminEmail } from '@/server/services/admin-check';
+import { userCan } from '@/server/services/admin-check';
 import { uploadLimiter } from '@/server/services/rate-limiter';
 import { uploadFile } from '@/server/services/storage';
 
@@ -57,12 +57,14 @@ function detectFileType(buffer: Buffer): DetectedFile | null {
 
 export async function POST(request: Request) {
   try {
-    // 仅 admin 可上传：先校验登录态，再校验邮箱白名单
+    // 上传属于站点配置操作（Logo / OG 图等均由门户设置页写入），
+    // 因此要的是 config.manage 而非泛泛的后台准入 —— 只有内容编辑权的
+    // editor 能进后台，但不该改站点级资源。
     const session = await auth.api.getSession({ headers: request.headers });
     if (!session?.user) {
       return NextResponse.json({ error: '请先登录' }, { status: 401 });
     }
-    if (!isAdminEmail(session.user.email)) {
+    if (!userCan(session.user, 'config.manage')) {
       return NextResponse.json({ error: '无权限' }, { status: 403 });
     }
     const rateLimitKey = session.user.id;

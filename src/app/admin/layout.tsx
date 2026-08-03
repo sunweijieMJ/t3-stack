@@ -1,7 +1,7 @@
 import { AntdRegistry } from '@ant-design/nextjs-registry';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/server/better-auth/server';
-import { isAdminEmail } from '@/server/services/admin-check';
+import { userCan } from '@/server/services/admin-check';
 import { AdminShell } from './admin-shell';
 import { AdminAntdProvider } from './antd-provider';
 
@@ -19,7 +19,7 @@ export default async function AdminLayout({
   // 正确回传的路径覆盖成后台首页。
   if (!session?.user) redirect('/signin');
 
-  if (!isAdminEmail(session.user.email)) {
+  if (!userCan(session.user, 'admin.access')) {
     redirect('/');
   }
 

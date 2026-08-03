@@ -12,10 +12,11 @@ import { after } from 'next/server';
 import superjson from 'superjson';
 import { ZodError } from 'zod';
 
+import type { Permission } from '@/lib/rbac';
 import { auth } from '@/server/better-auth';
 import { db } from '@/server/db';
 import { adminAuditLog } from '@/server/db/schema';
-import { isAdminEmail } from '@/server/services/admin-check';
+import { userCan } from '@/server/services/admin-check';
 import { getClientIp } from '@/server/services/get-client-ip';
 
 /**
@@ -199,21 +200,31 @@ const auditMiddleware = t.middleware(
 );
 
 /**
- * 管理员专用过程 —— 邮箱在 ADMIN_EMAILS 白名单中即可访问。
- * 继承自 protectedProcedure，确保登录态校验保持一致。
- * 所有 mutation 操作自动记录审计日志（含被 FORBIDDEN 拒绝的越权尝试）。
+ * 按权限点保护的过程工厂 —— 要求登录用户具备指定权限。
  *
- * 中间件顺序：auditMiddleware 在前，admin 校验在后。tRPC 的 .use() 是由外向内
- * 包裹，所以先注册的 audit 能捕获后注册的 admin 校验抛出的 FORBIDDEN。
+ * 权限由「ADMIN_EMAILS 白名单 + 数据库 role」共同决定，判定逻辑集中在
+ * services/admin-check 的 userCan，见 lib/rbac.ts。
+ *
+ * 中间件顺序：auditMiddleware 在前，权限校验在后。tRPC 的 .use() 是由外向内
+ * 包裹，所以先注册的 audit 能捕获后注册的权限校验抛出的 FORBIDDEN —— 越权尝试
+ * 因此仍会留痕，这正是审计最需要的记录。
  */
-export const adminProcedure = protectedProcedure
-  .use(auditMiddleware)
-  .use(({ ctx, next }) => {
-    if (!isAdminEmail(ctx.session.user.email)) {
+export const permissionProcedure = (permission: Permission) =>
+  protectedProcedure.use(auditMiddleware).use(({ ctx, next }) => {
+    if (!userCan(ctx.session.user, permission)) {
       throw new TRPCError({
         code: 'FORBIDDEN',
-        message: 'Admin access required',
+        message: `Missing permission: ${permission}`,
       });
     }
     return next({ ctx });
   });
+
+/**
+ * 管理员专用过程 —— 要求具备进入后台的权限。
+ *
+ * 保留这个名字是为了不动现有 router 的调用点；它现在等价于
+ * `permissionProcedure('admin.access')`。需要更细粒度时，直接在 router 里
+ * 换成对应权限点的 permissionProcedure，例如用户管理用 'user.manage'。
+ */
+export const adminProcedure = permissionProcedure('admin.access');
