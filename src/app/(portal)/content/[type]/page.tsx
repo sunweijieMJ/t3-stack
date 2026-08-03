@@ -1,6 +1,10 @@
 import dayjs from 'dayjs';
 import Link from 'next/link';
-import { listPublishedContent } from '@/server/services/content-public';
+import { notFound } from 'next/navigation';
+import {
+  getContentType,
+  listPublishedContent,
+} from '@/server/services/content-public';
 import styles from './content.module.scss';
 
 // 可见性取决于当前登录用户的角色，不能沿用 portal layout 的 ISR ——
@@ -20,12 +24,18 @@ export default async function ContentListPage({
   const { page: rawPage } = await searchParams;
   const page = Math.max(1, Number(rawPage) || 1);
 
+  // 未在后台登记的类型一律 404：不校验的话 /content/任意字符串 都会渲染出
+  // 一个空列表页并把原始 slug 当标题，既是 SEO 垃圾页，也让类型名打错这种
+  // 失误毫无提示。
+  const contentType = await getContentType(type);
+  if (!contentType) notFound();
+
   const { rows, total, pageSize } = await listPublishedContent({ type, page });
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
     <div className={styles.wrap}>
-      <h1 className={styles.heading}>{type}</h1>
+      <h1 className={styles.heading}>{contentType.label}</h1>
 
       {rows.length === 0 ? (
         <p className={styles.empty}>暂无内容</p>

@@ -53,6 +53,30 @@ export const frontendConfigSchema = {
       },
     },
   },
+  content: {
+    type: 'object',
+    title: '内容类型',
+    description:
+      '门户可访问的内容类型；未在此登记的类型，其列表页与详情页一律 404',
+    properties: {
+      types: {
+        type: 'array',
+        title: '类型清单',
+        description:
+          '标识只能用小写字母、数字和连字符，会直接出现在 URL 中（/content/<标识>）',
+        span: 24,
+        items: {
+          type: 'object',
+          title: '类型',
+          properties: {
+            slug: { type: 'string', title: '标识', defaultValue: '' },
+            label: { type: 'string', title: '名称', defaultValue: '' },
+          },
+        },
+        defaultValue: [],
+      },
+    },
+  },
   nav: {
     type: 'object',
     title: '导航菜单',

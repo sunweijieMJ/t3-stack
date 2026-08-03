@@ -1,7 +1,10 @@
 import dayjs from 'dayjs';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getPublishedContentBySlug } from '@/server/services/content-public';
+import {
+  getContentType,
+  getPublishedContentBySlug,
+} from '@/server/services/content-public';
 import styles from '../content.module.scss';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +27,9 @@ export async function generateMetadata({
 
 export default async function ContentDetailPage({ params }: PageProps) {
   const { type, slug } = await params;
+  // 类型未登记时直接 404，与列表页保持一致
+  if (!(await getContentType(type))) notFound();
+
   const row = await getPublishedContentBySlug(type, slug);
   // 不可见与不存在都走 404：区分开会让这个页面变成「该 slug 是否存在」的探测器
   if (!row) notFound();

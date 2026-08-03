@@ -1,10 +1,16 @@
 import 'server-only';
 import { and, count, desc, eq } from 'drizzle-orm';
+import {
+  type ContentType,
+  findContentType,
+  resolveContentTypes,
+} from '@/lib/content-types';
 import type { Viewer } from '@/lib/content-visibility';
 import { getSession } from '@/server/better-auth/server';
 import { db } from '@/server/db';
 import { content } from '@/server/db/schema';
 import { getUserRole } from '@/server/services/admin-check';
+import { getFrontendConfig } from '@/server/services/config';
 import { visibleContentWhere } from '@/server/services/content-query';
 
 /**
@@ -73,4 +79,41 @@ export async function getPublishedContentBySlug(type: string, slug: string) {
     )
     .limit(1);
   return row ?? null;
+}
+
+/** 后台配置的内容类型清单 */
+export async function getContentTypes(): Promise<ContentType[]> {
+  const cfg = await getFrontendConfig();
+  return resolveContentTypes(cfg.content?.types);
+}
+
+/** 按 slug 取类型；未登记返回 null，调用方据此 404 */
+export async function getContentType(
+  slug: string,
+): Promise<ContentType | null> {
+  return findContentType(await getContentTypes(), slug);
+}
+
+/**
+ * 供 sitemap 使用：匿名可见的全部内容。
+ *
+ * 视角固定为未登录访客 —— sitemap 是公开文件，把仅限特定角色可见的内容
+ * 列进去等于把它们泄露给所有人（连同标题和 URL）。
+ *
+ * 设上限而非全量：内容表会持续增长，无上限的查询迟早会拖垮 sitemap 请求。
+ * 超出部分不会被收录，这对模板的默认行为是可接受的取舍。
+ */
+const SITEMAP_LIMIT = 5000;
+
+export async function listSitemapContent() {
+  return db
+    .select({
+      type: content.type,
+      slug: content.slug,
+      updatedAt: content.updatedAt,
+    })
+    .from(content)
+    .where(visibleContentWhere({ role: null, now: new Date() }))
+    .orderBy(desc(content.updatedAt))
+    .limit(SITEMAP_LIMIT);
 }
