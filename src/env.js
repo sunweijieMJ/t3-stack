@@ -201,6 +201,20 @@ if (
     );
   }
 
+  // 白名单为空时告警而不是报错：数据库里的 role='admin' 同样能进后台，
+  // 因此空白名单本身是合法配置，不该阻断启动。但它是「一键部署后没人能进后台」
+  // 这类问题的头号成因，而且失败得毫无声息 —— 登录能成功、验证码收得到，
+  // 只是访问 /admin 被静默弹回首页，从状态码上完全看不出问题。
+  // 尤其在 Vercel 上，环境变量按 Production / Preview / Development 分别存储，
+  // 改错环境是极常见的失误（本项目线上踩过：改了 Development，生产纹丝不动）。
+  if (env.NODE_ENV === 'production' && !env.ADMIN_EMAILS) {
+    console.warn(
+      '⚠️  未配置 ADMIN_EMAILS：管理员将完全依赖数据库中 role=admin 的账号。' +
+        '若库里也没有这样的账号，则无人能进入后台，且访问 /admin 只会被静默重定向到首页。' +
+        '（Vercel 上请确认改的是 Production 环境的变量，并重新部署）',
+    );
+  }
+
   // 不抛错只告警：Next 进程直接暴露公网时 false 才是正确值，无法在这里判断拓扑。
   // 但本仓库自带的 compose + nginx 拓扑下 false 是个静默陷阱 —— getClientIp 恒返回
   // 'unknown'，于是全站 /api/* 共享同一个限流桶（默认 60 次/分钟），

@@ -13,6 +13,7 @@
 
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as authSchema from '@/server/db/auth-schema';
@@ -65,6 +66,33 @@ const auth = betterAuth({
   }),
 });
 
+/**
+ * 把账号提升为管理员。
+ *
+ * 脚本此前只调 signUpEmail 建账号，完全不碰权限 —— 于是「初始管理员」建出来
+ * 其实只是个普通账号，真正的管理员身份还得再配一个 ADMIN_EMAILS。两个变量
+ * 名字相近、用途不同，配漏一个的表现是「验证码收得到、能登录、但进不去后台」，
+ * 且全程无任何报错，极难定位（本项目线上实际踩过）。
+ * user 表现在有 role 列，这一步就该由脚本自己完成。
+ */
+async function promote(reason: string) {
+  await db
+    .update(authSchema.user)
+    .set({ role: 'admin' })
+    .where(eq(authSchema.user.email, email as string));
+  console.log(`  已设为管理员（${reason}）`);
+}
+
+/** 库里是否已存在任意管理员账号 */
+async function hasAnyAdmin(): Promise<boolean> {
+  const rows = await db
+    .select({ id: authSchema.user.id })
+    .from(authSchema.user)
+    .where(eq(authSchema.user.role, 'admin'))
+    .limit(1);
+  return rows.length > 0;
+}
+
 async function main() {
   console.log(`正在创建管理员用户: ${email}`);
 
@@ -81,6 +109,7 @@ async function main() {
     console.log(`  ID:    ${result.user.id}`);
     console.log(`  Email: ${result.user.email}`);
     console.log(`  Name:  ${result.user.name}`);
+    await promote('新建账号');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (
@@ -89,6 +118,15 @@ async function main() {
       msg.includes('unique')
     ) {
       console.log(`管理员 ${email} 已存在，跳过创建`);
+      // 账号已存在时**不无条件**改角色：SEED_ADMIN_EMAIL 常年留在环境变量里，
+      // 每次部署都强制提权会覆盖掉运维方有意做的降级。
+      // 只在「库里一个管理员都没有」时兜底提升 —— 这正是脚本存在的意义：
+      // 保证至少有人能进后台。存量部署（迁移后所有人都是 user）也靠这条自愈。
+      if (await hasAnyAdmin()) {
+        console.log('  库中已有管理员，保持该账号现有角色不变');
+      } else {
+        await promote('库中没有任何管理员，兜底提升');
+      }
     } else {
       // 输出完整错误对象（含 cause / stack），便于排查 SQL/SSL/Schema 问题
       console.error('创建失败:', err);

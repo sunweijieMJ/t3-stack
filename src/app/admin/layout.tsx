@@ -20,7 +20,7 @@ export default async function AdminLayout({
   if (!session?.user) redirect('/signin');
 
   if (!userCan(session.user, 'admin.access')) {
-    redirect('/');
+    redirect('/no-access');
   }
 
   // AntdRegistry 负责在 SSR 阶段收集 antd 的 CSS-in-JS 并通过 useServerInsertedHTML

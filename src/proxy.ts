@@ -93,7 +93,10 @@ export async function proxy(request: NextRequest) {
     }
 
     if (!userCan(session.user, 'admin.access')) {
-      return NextResponse.redirect(new URL('/', request.url));
+      // 送到说明页而不是首页：弹回首页看起来和「登录没成功」「跳转配错了」
+      // 完全一样，用户拿不到任何线索。/no-access 不在本文件的 matcher 里，
+      // 不会因为再次进入守卫而循环重定向。
+      return NextResponse.redirect(new URL('/no-access', request.url));
     }
   }
 
