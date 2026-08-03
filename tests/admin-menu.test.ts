@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ADMIN_MENU,
   defaultAdminPath,
+  permissionForAdminPath,
   visibleAdminMenu,
 } from '@/lib/admin-menu';
 import { hasPermission } from '@/lib/rbac';
@@ -48,5 +49,48 @@ describe('defaultAdminPath', () => {
 
   it('没有任何后台权限时返回 null', () => {
     expect(defaultAdminPath('user')).toBeNull();
+  });
+});
+
+describe('permissionForAdminPath', () => {
+  it('菜单页返回对应权限点', () => {
+    expect(permissionForAdminPath('/admin/users')).toBe('user.manage');
+    expect(permissionForAdminPath('/admin/content')).toBe('content.manage');
+    expect(permissionForAdminPath('/admin/audit-logs')).toBe('audit.read');
+    expect(permissionForAdminPath('/admin/setting')).toBe('config.manage');
+  });
+
+  it('子路由继承父页面的权限点', () => {
+    expect(permissionForAdminPath('/admin/content/123')).toBe('content.manage');
+    expect(permissionForAdminPath('/admin/users/abc/edit')).toBe('user.manage');
+  });
+
+  it('/admin 自身不额外限制，交给落点分发', () => {
+    expect(permissionForAdminPath('/admin')).toBeNull();
+  });
+
+  it('未登记的后台路径不额外限制（交给 404）', () => {
+    expect(permissionForAdminPath('/admin/nope')).toBeNull();
+  });
+
+  // 前缀匹配不能退化成 startsWith(item.key)：那样 /admin/users-export 这种
+  // 同前缀的**不同**页面会被误判成继承 /admin/users 的权限。
+  it('同前缀的不同路径不会被误匹配', () => {
+    expect(permissionForAdminPath('/admin/users-export')).toBeNull();
+    expect(permissionForAdminPath('/admin/settings')).toBeNull();
+  });
+
+  // 这条守的是 URL 直达：菜单藏起来了，地址栏敲进去也必须被挡下。
+  it.each([
+    ['editor', '/admin/users', false],
+    ['editor', '/admin/setting', false],
+    ['editor', '/admin/audit-logs', false],
+    ['editor', '/admin/content', true],
+    ['admin', '/admin/users', true],
+  ] as const)('role=%s 访问 %s → %s', (role, path, allowed) => {
+    const permission = permissionForAdminPath(path);
+    expect(permission === null || hasPermission(role, permission)).toBe(
+      allowed,
+    );
   });
 });

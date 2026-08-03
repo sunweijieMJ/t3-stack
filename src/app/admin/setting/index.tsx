@@ -1,6 +1,7 @@
 'use client';
 
 import { App, Button, Card, Radio, Space, Spin, Tooltip } from 'antd';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ConfigEditor, { type EditMode } from '@/components/ConfigEditor';
 import { frontendConfigSchema } from '@/constants/frontend-config';
@@ -29,11 +30,25 @@ function describeValidationError(
 
 export default function AdminSettingPage() {
   const { message, modal } = App.useApp();
+  const router = useRouter();
   const {
     data: stored,
     isLoading,
     refetch,
   } = api.page.getFrontendConfig.useQuery();
+
+  /**
+   * 保存后除了 refetch 本页数据，还要 router.refresh()。
+   *
+   * 侧边栏站点名与 antd 主题色现在由 admin/layout 在服务端读取后按 props 注入
+   * （见那边的说明），不再是本页 query 的衍生值 —— 只 refetch 的话，配置存进去了、
+   * 顶部和侧边栏却纹丝不动，看起来就像没保存成功。
+   * 服务端已在 saveFrontendConfig 里 revalidateTag，refresh 拿到的是新值。
+   */
+  const syncSaved = useCallback(() => {
+    void refetch();
+    router.refresh();
+  }, [refetch, router]);
   // 持有读取时的 updatedAt 作为乐观锁版本号，保存/重置时回传给后端
   const expectedUpdatedAt = useMemo(
     () =>
@@ -71,14 +86,14 @@ export default function AdminSettingPage() {
   const saveMutation = api.page.saveFrontendConfig.useMutation({
     onSuccess: () => {
       message.success('配置已保存');
-      void refetch();
+      syncSaved();
     },
     onError: buildErrorHandler('保存失败，请重试'),
   });
   const resetMutation = api.page.saveFrontendConfig.useMutation({
     onSuccess: () => {
       message.success('已恢复默认配置');
-      void refetch();
+      syncSaved();
     },
     onError: buildErrorHandler('恢复失败，请重试'),
   });

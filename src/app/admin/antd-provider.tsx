@@ -3,19 +3,26 @@
 import { App, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import { useMemo } from 'react';
-import { DEFAULT_PRIMARY_COLOR } from '@/constants/frontend-config';
-import { useFrontendConfig } from '@/hooks/useFrontendConfig';
 
-export function AdminAntdProvider({ children }: { children: React.ReactNode }) {
-  const cfg = useFrontendConfig();
+export function AdminAntdProvider({
+  children,
+  primaryColor,
+}: {
+  children: React.ReactNode;
+  /**
+   * 由 admin/layout 在服务端读好后注入。不在这里自己查配置：那条路要
+   * config.manage，而本组件包着所有后台页面，editor 会因此每次都撞 403。
+   */
+  primaryColor: string;
+}) {
   const theme = useMemo(
     () => ({
       token: {
         borderRadius: 8,
-        colorPrimary: cfg.basic?.primaryColor || DEFAULT_PRIMARY_COLOR,
+        colorPrimary: primaryColor,
       },
     }),
-    [cfg.basic?.primaryColor],
+    [primaryColor],
   );
 
   return (

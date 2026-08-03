@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
+import { permissionForAdminPath } from '@/lib/admin-menu';
 import { auth } from '@/server/better-auth';
 import { userCan } from '@/server/services/admin-check';
 import { getClientIp } from '@/server/services/get-client-ip';
@@ -9,7 +10,7 @@ import {
   otpSendLimiter,
 } from '@/server/services/rate-limiter';
 
-// /admin/* 路径需要登录且必须是 admin 角色
+// /admin/* 路径需要登录且必须具备后台准入权限
 const adminPatterns = [/^\/admin(\/|$)/];
 
 // 有成本的验证码发送端点（邮件），单独严格限流
@@ -96,6 +97,15 @@ export async function proxy(request: NextRequest) {
       // 送到说明页而不是首页：弹回首页看起来和「登录没成功」「跳转配错了」
       // 完全一样，用户拿不到任何线索。/no-access 不在本文件的 matcher 里，
       // 不会因为再次进入守卫而循环重定向。
+      return NextResponse.redirect(new URL('/no-access', request.url));
+    }
+
+    // 再按具体页面所需的权限点拦一道：能进后台 ≠ 每个页面都能进。
+    // editor 有 admin.access，但 /admin/users、/admin/setting、/admin/audit-logs
+    // 都不该进得去。判定复用 ADMIN_MENU（见 lib/admin-menu 的说明），
+    // 新增页面只要在那里登记就自动受保护。
+    const pagePermission = permissionForAdminPath(pathname);
+    if (pagePermission && !userCan(session.user, pagePermission)) {
       return NextResponse.redirect(new URL('/no-access', request.url));
     }
   }

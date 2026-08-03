@@ -15,13 +15,9 @@ import { App, Button, Dropdown, Layout, Menu, Tooltip, theme } from 'antd';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { useFrontendConfig } from '@/hooks/useFrontendConfig';
 import { visibleAdminMenu } from '@/lib/admin-menu';
 import { authClient } from '@/lib/auth-client';
-import { pickI18nText, resolveSiteLang } from '@/lib/i18n-text';
 import type { Role } from '@/lib/rbac';
-
-const SITE_NAME_FALLBACK = 'Site';
 
 const { Sider, Content, Header } = Layout;
 
@@ -37,25 +33,25 @@ const MENU_ICONS: Record<string, React.ReactNode> = {
 export function AdminShell({
   children,
   role,
+  siteName,
 }: {
   children: React.ReactNode;
   /** 由 layout 在服务端解析后注入，见那边的说明 */
   role: Role;
+  /**
+   * 由 layout 在服务端按 basic.defaultLanguage 取好的站点名。
+   *
+   * 不在这里自己查配置：那条路要 config.manage，而本组件包着所有后台页面，
+   * editor 会因此每次都撞 403 并静默退回默认站点名。服务端取值还顺带保证了
+   * 侧边栏与浏览器标题（同样走 getSiteName）用的是同一种语言。
+   */
+  siteName: string;
 }) {
   const { modal } = App.useApp();
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const { data: session } = authClient.useSession();
-  const frontendConfig = useFrontendConfig();
-  // 语言必须跟随 basic.defaultLanguage，不能硬编码 'zh-CN'：否则配成 en-US 时
-  // 浏览器标题（走服务端 getDefaultLang）是英文、侧边栏却仍是中文。
-  // 这里从同一份响应式配置里取，保存设置后无需刷新即可同步。
-  const siteName = pickI18nText(
-    frontendConfig.basic?.systemTitle,
-    resolveSiteLang(frontendConfig.basic?.defaultLanguage),
-    SITE_NAME_FALLBACK,
-  );
   const {
     token: { colorBgContainer },
   } = theme.useToken();
