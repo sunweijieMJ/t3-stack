@@ -18,6 +18,7 @@ import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useState } from 'react';
 import { EllipsisCell } from '@/components/EllipsisCell';
+import { ImageUploader } from '@/components/ImageUploader';
 import { RichTextEditor } from '@/components/RichTextEditor';
 import {
   CONTENT_STATUSES,
@@ -52,6 +53,8 @@ const ROLE_LABELS: Record<(typeof ROLES)[number], string> = {
 
 interface EditorForm {
   type: string;
+  categoryId?: number | null;
+  coverImage?: string | null;
   slug: string;
   title: string;
   summary?: string;
@@ -70,7 +73,30 @@ const EMPTY_FORM: EditorForm = {
   status: 'draft',
   visibleRoles: [],
   pinned: false,
+  categoryId: null,
+  coverImage: null,
 };
+
+/**
+ * 包一层是因为 ImageUploader 的必填 module 无法由 Form.Item 注入，
+ * 而 Form.Item 只会往子组件传 value / onChange。
+ */
+function CoverField({
+  value,
+  onChange,
+}: {
+  value?: string | null;
+  onChange?: (url: string | null) => void;
+}) {
+  return (
+    <ImageUploader
+      module="portal"
+      onChange={(url) => onChange?.(url)}
+      placeholder="上传封面"
+      value={value}
+    />
+  );
+}
 
 export default function AdminContentView() {
   const { message, modal } = App.useApp();
@@ -83,6 +109,8 @@ export default function AdminContentView() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const pageSize = 20;
+  const { data: categories } = api.content.listCategories.useQuery();
+
   const { data, isLoading } = api.content.list.useQuery({
     page,
     pageSize,
@@ -138,6 +166,8 @@ export default function AdminContentView() {
       unpublishedAt: row.unpublishedAt ? dayjs(row.unpublishedAt) : null,
       visibleRoles: row.visibleRoles,
       pinned: row.pinned,
+      categoryId: row.categoryId,
+      coverImage: row.coverImage,
     });
     setDrawerOpen(true);
   };
@@ -157,6 +187,8 @@ export default function AdminContentView() {
           unpublishedAt: vals.unpublishedAt?.toISOString() ?? null,
           visibleRoles: (vals.visibleRoles ?? []) as (typeof ROLES)[number][],
           pinned: vals.pinned ?? false,
+          categoryId: vals.categoryId ?? null,
+          coverImage: vals.coverImage ?? undefined,
         };
         return editing
           ? updateMutation.mutate({ ...payload, id: editing.id })
@@ -325,6 +357,27 @@ export default function AdminContentView() {
           >
             <Input />
           </Form.Item>
+
+          <Space size="large" style={{ display: 'flex' }}>
+            <Form.Item label="分类" name="categoryId" style={{ flex: 1 }}>
+              <Select
+                allowClear
+                options={(categories ?? []).map((c) => ({
+                  value: c.id,
+                  label: c.name,
+                }))}
+                placeholder="未分类"
+              />
+            </Form.Item>
+            <Form.Item
+              getValueFromEvent={(url: string | null) => url}
+              label="封面图"
+              name="coverImage"
+              style={{ flex: 1 }}
+            >
+              <CoverField />
+            </Form.Item>
+          </Space>
 
           <Form.Item label="摘要" name="summary">
             <Input.TextArea

@@ -10,7 +10,7 @@ import {
   publicProcedure,
 } from '@/server/api/trpc';
 import { isUniqueViolation } from '@/server/db/pg-error';
-import { content } from '@/server/db/schema';
+import { content, contentCategory } from '@/server/db/schema';
 import { getUserRole } from '@/server/services/admin-check';
 import { visibleContentWhere } from '@/server/services/content-query';
 
@@ -163,6 +163,61 @@ export const contentRouter = createTRPCRouter({
         .returning({ id: content.id });
       if (deleted.length === 0) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '内容不存在' });
+      }
+      return { success: true };
+    }),
+
+  // ---- 分类 ----
+
+  listCategories: manageProcedure.query(async ({ ctx }) => {
+    return ctx.db
+      .select()
+      .from(contentCategory)
+      .orderBy(contentCategory.sortOrder, contentCategory.id);
+  }),
+
+  createCategory: manageProcedure
+    .input(
+      z.object({
+        name: z.string().min(1).max(128),
+        slug: slugSchema.max(128),
+        parentId: z.number().int().positive().nullable().optional(),
+        sortOrder: z.number().int().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const [row] = await ctx.db
+          .insert(contentCategory)
+          .values(input)
+          .returning();
+        return row;
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: '已存在相同 slug 的分类',
+          });
+        }
+        console.error('[content.createCategory] 创建失败:', err);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: '创建分类失败',
+        });
+      }
+    }),
+
+  deleteCategory: manageProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      // 引用该分类的内容不会被删除，外键是 ON DELETE SET NULL，
+      // 内容会挂回「未分类」；子分类同理挂回顶层。
+      const deleted = await ctx.db
+        .delete(contentCategory)
+        .where(eq(contentCategory.id, input.id))
+        .returning({ id: contentCategory.id });
+      if (deleted.length === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '分类不存在' });
       }
       return { success: true };
     }),

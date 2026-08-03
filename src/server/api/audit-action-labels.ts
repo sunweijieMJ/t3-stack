@@ -16,4 +16,6 @@ export const ACTION_LABELS: Record<string, string> = {
   'content.create': '创建内容',
   'content.update': '更新内容',
   'content.delete': '删除内容',
+  'content.createCategory': '创建内容分类',
+  'content.deleteCategory': '删除内容分类',
 };
