@@ -17,19 +17,42 @@ export type ContentState =
   | 'archived';
 
 export interface ContentVisibilityInput {
-  status: ContentStatus;
+  /**
+   * 存的是数据库里的原始值（varchar 列，TS 类型为 string），
+   * 由 resolveContentState 内部归一，调用方不需要先转成联合类型。
+   */
+  status: string;
   /** 定时发布时间；null 表示发布即生效 */
   publishedAt: Date | null;
   /** 定时下架时间；null 表示长期有效 */
   unpublishedAt: Date | null;
-  /** 可见角色白名单；空数组表示不限制（含未登录访客） */
-  visibleRoles: readonly Role[];
+  /**
+   * 可见角色白名单；空数组表示不限制（含未登录访客）。
+   * 同样存数据库原始值（text[]）。数组里若混入非法角色名，它匹配不上任何
+   * 合法角色，效果是「这条限制收得更紧」，方向安全，无需额外校验。
+   */
+  visibleRoles: readonly string[];
 }
 
 export interface Viewer {
   /** null 表示未登录访客 */
   role: Role | null;
   now: Date;
+}
+
+const STATUS_SET: ReadonlySet<string> = new Set(CONTENT_STATUSES);
+
+/**
+ * 把任意来源的值收敛成合法状态。
+ *
+ * 与 normalizeRole 同理：status 来自 varchar 列，历史数据、手工改库、回滚到
+ * 旧版本都可能带来预期外的值。不抛错而是回落 —— 但回落方向是 'draft' 而非
+ * 'published'：脏值应当导致内容**不可见**，反过来会把不该公开的东西放出去。
+ */
+export function normalizeContentStatus(value: unknown): ContentStatus {
+  return typeof value === 'string' && STATUS_SET.has(value)
+    ? (value as ContentStatus)
+    : 'draft';
 }
 
 /**
@@ -43,8 +66,9 @@ export function resolveContentState(
   content: ContentVisibilityInput,
   now: Date,
 ): ContentState {
-  if (content.status === 'draft') return 'draft';
-  if (content.status === 'archived') return 'archived';
+  const status = normalizeContentStatus(content.status);
+  if (status === 'draft') return 'draft';
+  if (status === 'archived') return 'archived';
   if (content.unpublishedAt && content.unpublishedAt <= now) return 'expired';
   if (content.publishedAt && content.publishedAt > now) return 'scheduled';
   return 'live';

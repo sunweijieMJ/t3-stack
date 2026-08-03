@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  FileTextOutlined,
   GlobalOutlined,
   HistoryOutlined,
   LogoutOutlined,
@@ -27,6 +28,11 @@ const MENU_ITEMS: MenuProps['items'] = [
     key: '/admin/users',
     icon: <TeamOutlined />,
     label: '用户管理',
+  },
+  {
+    key: '/admin/content',
+    icon: <FileTextOutlined />,
+    label: '内容管理',
   },
   {
     key: '/admin/audit-logs',

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type ContentVisibilityInput,
   isContentVisibleTo,
+  normalizeContentStatus,
   resolveContentState,
 } from '@/lib/content-visibility';
 
@@ -152,5 +153,33 @@ describe('isContentVisibleTo 按角色范围', () => {
         now: NOW,
       }),
     ).toBe(false);
+  });
+});
+
+describe('normalizeContentStatus', () => {
+  it('识别合法状态', () => {
+    expect(normalizeContentStatus('draft')).toBe('draft');
+    expect(normalizeContentStatus('published')).toBe('published');
+    expect(normalizeContentStatus('archived')).toBe('archived');
+  });
+
+  it('未知状态回落到 draft，即最不暴露的一侧', () => {
+    expect(normalizeContentStatus('live')).toBe('draft');
+    expect(normalizeContentStatus('')).toBe('draft');
+  });
+
+  it('空值与非字符串不抛错', () => {
+    expect(normalizeContentStatus(null)).toBe('draft');
+    expect(normalizeContentStatus(undefined)).toBe('draft');
+    expect(normalizeContentStatus(42)).toBe('draft');
+  });
+});
+
+describe('resolveContentState 对脏状态的处理', () => {
+  it('库里被写入非法 status 时按草稿处理，不会误发布', () => {
+    const dirty = { ...content(), status: 'whatever' as never };
+
+    expect(resolveContentState(dirty, NOW)).toBe('draft');
+    expect(isContentVisibleTo(dirty, { role: 'admin', now: NOW })).toBe(false);
   });
 });
