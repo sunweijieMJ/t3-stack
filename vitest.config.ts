@@ -27,6 +27,8 @@ export default defineConfig({
       include: [
         'src/lib/auth-error.ts',
         'src/lib/auth-methods.ts',
+        'src/lib/content-html.ts',
+        'src/lib/content-visibility.ts',
         'src/lib/frontend-config.ts',
         'src/lib/i18n-text.ts',
         'src/lib/rbac.ts',

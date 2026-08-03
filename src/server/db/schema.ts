@@ -4,6 +4,7 @@ import { user } from './auth-schema';
 import { createTable } from './table-creator';
 
 export * from './auth-schema';
+export * from './content-schema';
 export { createTable } from './table-creator';
 export * from './user-relations';
 
