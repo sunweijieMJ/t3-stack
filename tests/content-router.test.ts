@@ -9,7 +9,7 @@ import {
 } from 'vitest';
 import type { Role } from '@/lib/rbac';
 import { createCaller } from '@/server/api/root';
-import { content, user } from '@/server/db/schema';
+import { content, systemConfig, user } from '@/server/db/schema';
 import { createTestDb, resetDb, type TestDb } from './helpers/db';
 
 // 审计中间件用 next/server 的 after() 把日志写入保活到响应之后，而 after() 要求
@@ -71,6 +71,22 @@ const draft = {
 };
 
 /**
+ * 登记内容类型。create / update 会校验 type 是否在「门户设置 → 内容类型」里
+ * 登记过（未登记的类型在门户一律 404，建出来就是一篇打不开的内容），
+ * 不先写这行配置的话，所有写入都会被判为 BAD_REQUEST。
+ */
+async function seedContentTypes(db: TestDb, slugs = ['news']) {
+  await db.insert(systemConfig).values({
+    key: 'frontend',
+    value: {
+      content: { types: slugs.map((s) => ({ slug: s, label: s })) },
+    },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+}
+
+/**
  * 写入测试用户。content.author_id 有指向 user 的外键，不先建用户的话
  * 创建内容会因外键约束失败，而 router 会把它统一报成「创建内容失败」。
  */
@@ -101,6 +117,7 @@ describe('content router 权限', () => {
   beforeEach(async () => {
     await resetDb(db);
     await seedUsers(db);
+    await seedContentTypes(db);
   });
 
   it('未登录不能创建内容', async () => {
@@ -148,6 +165,7 @@ describe('content router 正文净化', () => {
   beforeEach(async () => {
     await resetDb(db);
     await seedUsers(db);
+    await seedContentTypes(db);
   });
 
   it('创建时剥离脚本，落库的是净化后的 HTML', async () => {
@@ -189,6 +207,7 @@ describe('content router 门户读取', () => {
   beforeEach(async () => {
     await resetDb(db);
     await seedUsers(db);
+    await seedContentTypes(db);
   });
 
   it('草稿不出现在门户列表里', async () => {
@@ -288,6 +307,7 @@ describe('content router slug 约束', () => {
   beforeEach(async () => {
     await resetDb(db);
     await seedUsers(db);
+    await seedContentTypes(db);
   });
 
   it('拒绝非法 slug', async () => {
@@ -302,5 +322,83 @@ describe('content router slug 约束', () => {
     await expect(callerFor(db, ADMIN).content.create(draft)).rejects.toThrow(
       /CONFLICT|已存在/,
     );
+  });
+});
+
+describe('content router 类型登记校验', () => {
+  let db: TestDb;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, close } = await createTestDb());
+    serverDbHolder.db = db;
+  });
+  afterAll(async () => {
+    await close();
+  });
+  beforeEach(async () => {
+    await resetDb(db);
+    await seedUsers(db);
+    await seedContentTypes(db);
+  });
+
+  it('创建未登记的类型被拒绝', async () => {
+    await expect(
+      callerFor(db, ADMIN).content.create({ ...draft, type: 'unregistered' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('一个类型都没登记时，连默认类型也建不了', async () => {
+    await db.delete(systemConfig);
+
+    await expect(
+      callerFor(db, ADMIN).content.create(draft),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('更新时换成未登记的类型被拒绝', async () => {
+    const created = await callerFor(db, ADMIN).content.create(draft);
+    if (!created) throw new Error('测试前置条件失败：内容未创建');
+
+    await expect(
+      callerFor(db, ADMIN).content.update({
+        ...draft,
+        id: created.id,
+        type: 'unregistered',
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('类型从清单移除后，历史内容沿用原类型仍可编辑', async () => {
+    const created = await callerFor(db, ADMIN).content.create(draft);
+    if (!created) throw new Error('测试前置条件失败：内容未创建');
+
+    // 管理员把 news 从清单里删掉，只留 blog
+    await db.delete(systemConfig);
+    await seedContentTypes(db, ['blog']);
+
+    const updated = await callerFor(db, ADMIN).content.update({
+      ...draft,
+      id: created.id,
+      title: '改个错别字',
+    });
+
+    expect(updated?.title).toBe('改个错别字');
+  });
+
+  it('类型从清单移除后，仍可把历史内容改成一个已登记的类型', async () => {
+    const created = await callerFor(db, ADMIN).content.create(draft);
+    if (!created) throw new Error('测试前置条件失败：内容未创建');
+
+    await db.delete(systemConfig);
+    await seedContentTypes(db, ['blog']);
+
+    const updated = await callerFor(db, ADMIN).content.update({
+      ...draft,
+      id: created.id,
+      type: 'blog',
+    });
+
+    expect(updated?.type).toBe('blog');
   });
 });

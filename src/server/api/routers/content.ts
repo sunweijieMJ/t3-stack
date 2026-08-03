@@ -1,7 +1,9 @@
 import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, ilike, type SQL } from 'drizzle-orm';
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { z } from 'zod';
 import { sanitizeContentHtml } from '@/lib/content-html';
+import { resolveContentTypes } from '@/lib/content-types';
 import { CONTENT_STATUSES } from '@/lib/content-visibility';
 import { ROLES } from '@/lib/rbac';
 import {
@@ -10,11 +12,46 @@ import {
   publicProcedure,
 } from '@/server/api/trpc';
 import { isUniqueViolation } from '@/server/db/pg-error';
-import { content, contentCategory } from '@/server/db/schema';
+import type * as schema from '@/server/db/schema';
+import { content, contentCategory, systemConfig } from '@/server/db/schema';
 import { getUserRole } from '@/server/services/admin-check';
+import { FRONTEND_CONFIG_KEY } from '@/server/services/config';
 import { visibleContentWhere } from '@/server/services/content-query';
 
 const manageProcedure = permissionProcedure('content.manage');
+
+/**
+ * 校验 type 是否在「门户设置 → 内容类型」里登记过。
+ *
+ * 门户对未登记的类型一律 404（见 app/(portal)/content/[type]/page.tsx），
+ * 所以放进来一个没登记的类型，等于建了一篇永远打不开的内容，而后台列表
+ * 还会显示「已发布」—— 这种失败完全没有声音。后台表单已经收敛成下拉框，
+ * 这里是绕开 UI 直接调接口时的第二道。
+ *
+ * 直接用 ctx.db 读而不是走 services/config 的 getFrontendConfig：那条路裹了
+ * unstable_cache（60s）与 React cache，校验读到过期快照会把刚登记的类型判为
+ * 非法。校验要的是此刻的真实值，且这是低频的后台写操作，多一次查询无所谓。
+ */
+async function assertRegisteredType(
+  db: PostgresJsDatabase<typeof schema>,
+  type: string,
+): Promise<void> {
+  const [row] = await db
+    .select({ value: systemConfig.value })
+    .from(systemConfig)
+    .where(eq(systemConfig.key, FRONTEND_CONFIG_KEY))
+    .limit(1);
+  const types = resolveContentTypes(
+    (row?.value as { content?: { types?: unknown } } | undefined)?.content
+      ?.types,
+  );
+  if (!types.some((t) => t.slug === type)) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `内容类型「${type}」未在门户设置中登记，保存后在门户无法访问。请先到「门户设置 → 内容类型」添加。`,
+    });
+  }
+}
 
 /** slug 只允许小写字母、数字与连字符：它会直接进 URL，放开会引入编码与路由歧义 */
 const slugSchema = z
@@ -126,6 +163,7 @@ export const contentRouter = createTRPCRouter({
   create: manageProcedure
     .input(contentInput)
     .mutation(async ({ ctx, input }) => {
+      await assertRegisteredType(ctx.db, input.type);
       try {
         const [row] = await ctx.db
           .insert(content)
@@ -149,6 +187,23 @@ export const contentRouter = createTRPCRouter({
     .input(contentInput.extend({ id: z.number().int().positive() }))
     .mutation(async ({ ctx, input }) => {
       const { id, ...rest } = input;
+
+      // 沿用原有类型时不校验登记状态：类型清单是可编辑的，管理员移除某个类型后，
+      // 该类型下的历史内容连改个错别字都会保存失败 —— 而此时最需要的恰恰是能把它
+      // 改成一个有效类型。换成**别的**类型时仍然必须已登记。
+      // 后台表单会把这种未登记的原类型作为额外选项标注出来，两边语义一致。
+      const [existing] = await ctx.db
+        .select({ type: content.type })
+        .from(content)
+        .where(eq(content.id, id))
+        .limit(1);
+      if (!existing) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '内容不存在' });
+      }
+      if (rest.type !== existing.type) {
+        await assertRegisteredType(ctx.db, rest.type);
+      }
+
       try {
         const updated = await ctx.db
           .update(content)

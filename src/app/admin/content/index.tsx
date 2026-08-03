@@ -2,6 +2,7 @@
 
 import { PlusOutlined } from '@ant-design/icons';
 import {
+  Alert,
   App,
   Button,
   DatePicker,
@@ -16,10 +17,12 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
+import Link from 'next/link';
 import { useState } from 'react';
 import { EllipsisCell } from '@/components/EllipsisCell';
 import { ImageUploader } from '@/components/ImageUploader';
 import { RichTextEditor } from '@/components/RichTextEditor';
+import type { ContentType } from '@/lib/content-types';
 import {
   CONTENT_STATUSES,
   type ContentState,
@@ -68,16 +71,23 @@ interface EditorForm {
   pinned?: boolean;
 }
 
-const EMPTY_FORM: EditorForm = {
-  type: 'news',
-  slug: '',
-  title: '',
-  status: 'draft',
-  visibleRoles: [],
-  pinned: false,
-  categoryId: null,
-  coverImage: null,
-};
+/**
+ * 新建表单的初值。类型不能写死 'news' —— 门户只认「门户设置」里登记过的类型，
+ * 写死一个大概率没登记的值，建出来的内容在门户一律 404，而后台列表还显示
+ * 「已发布」，没有任何地方提示哪里不对。默认取清单里的第一项。
+ */
+function emptyForm(defaultType: string): EditorForm {
+  return {
+    type: defaultType,
+    slug: '',
+    title: '',
+    status: 'draft',
+    visibleRoles: [],
+    pinned: false,
+    categoryId: null,
+    coverImage: null,
+  };
+}
 
 /**
  * 包一层是因为 ImageUploader 的必填 module 无法由 Form.Item 注入，
@@ -100,7 +110,14 @@ function CoverField({
   );
 }
 
-export default function AdminContentView() {
+interface AdminContentViewProps {
+  /** 「门户设置 → 内容类型」里登记的清单，由 page.tsx 在服务端读取后注入 */
+  contentTypes: ContentType[];
+}
+
+export default function AdminContentView({
+  contentTypes,
+}: AdminContentViewProps) {
   const { message, modal } = App.useApp();
   const utils = api.useUtils();
   const [form] = Form.useForm<EditorForm>();
@@ -109,6 +126,22 @@ export default function AdminContentView() {
   const [keyword, setKeyword] = useState('');
   const [editing, setEditing] = useState<ContentDetail | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const typeOptions = contentTypes.map((t) => ({
+    value: t.slug,
+    label: `${t.label}（${t.slug}）`,
+  }));
+  // 正在编辑的内容若带着一个已从清单里移除的类型，把它作为额外选项补进来并标注。
+  // 不补的话下拉框显示不出当前值，用户一保存就会把类型换成别的，属于静默改数据。
+  // 服务端同样允许「沿用原类型」，两边语义一致，见 routers/content.ts。
+  const editingType = editing?.type;
+  const options =
+    editingType && !contentTypes.some((t) => t.slug === editingType)
+      ? [
+          ...typeOptions,
+          { value: editingType, label: `${editingType}（未登记）` },
+        ]
+      : typeOptions;
 
   const pageSize = 20;
   const { data: categories } = api.content.listCategories.useQuery();
@@ -151,7 +184,7 @@ export default function AdminContentView() {
 
   const openCreate = () => {
     setEditing(null);
-    form.setFieldsValue(EMPTY_FORM);
+    form.setFieldsValue(emptyForm(contentTypes[0]?.slug ?? ''));
     setDrawerOpen(true);
   };
 
@@ -285,6 +318,25 @@ export default function AdminContentView() {
 
   return (
     <div>
+      {/* 清单为空是全新部署的默认状态（content.types 默认值就是 []）。不提示的话，
+          用户会建出一批门户永远 404 的内容，而后台看起来一切正常。 */}
+      {contentTypes.length === 0 && (
+        <Alert
+          action={
+            <Link href="/admin/setting">
+              <Button size="small" type="primary">
+                去登记
+              </Button>
+            </Link>
+          }
+          description="内容必须归属于一个已登记的类型，门户才能访问。请先到「门户设置 → 内容类型」添加至少一个类型。"
+          message="尚未登记任何内容类型"
+          showIcon
+          style={{ marginBottom: 16 }}
+          type="warning"
+        />
+      )}
+
       <Space style={{ marginBottom: 16 }}>
         <Input.Search
           allowClear
@@ -295,7 +347,15 @@ export default function AdminContentView() {
           placeholder="搜索标题"
           style={{ width: 240 }}
         />
-        <Button icon={<PlusOutlined />} onClick={openCreate} type="primary">
+        <Button
+          disabled={contentTypes.length === 0}
+          icon={<PlusOutlined />}
+          onClick={openCreate}
+          title={
+            contentTypes.length === 0 ? '请先登记至少一个内容类型' : undefined
+          }
+          type="primary"
+        >
           新建内容
         </Button>
       </Space>
@@ -338,11 +398,16 @@ export default function AdminContentView() {
             <Form.Item
               label="类型"
               name="type"
-              rules={[{ required: true, message: '请填写类型' }]}
+              rules={[{ required: true, message: '请选择类型' }]}
               style={{ flex: 1 }}
-              tooltip="用于区分公告、新闻、文章等，门户按它取数"
+              tooltip="只能从「门户设置 → 内容类型」登记过的清单中选择；未登记的类型在门户会 404"
             >
-              <Input placeholder="news" />
+              <Select
+                options={options}
+                placeholder={
+                  options.length === 0 ? '尚未登记任何类型' : '请选择'
+                }
+              />
             </Form.Item>
             <Form.Item
               label="Slug"
