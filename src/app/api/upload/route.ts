@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import { NextResponse } from 'next/server';
 
+import { MODULE_PERMISSIONS, resolveUploadModule } from '@/lib/upload-modules';
 import { auth } from '@/server/better-auth';
 import { userCan } from '@/server/services/admin-check';
 import { uploadLimiter } from '@/server/services/rate-limiter';
@@ -8,7 +9,6 @@ import { uploadFile } from '@/server/services/storage';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 const MAX_PDF_SIZE = 20 * 1024 * 1024; // 20MB
-const ALLOWED_MODULES = ['portal', 'avatars', 'misc'] as const;
 const ACCEPT_TYPES = ['image', 'pdf'] as const;
 type AcceptType = (typeof ACCEPT_TYPES)[number];
 
@@ -57,14 +57,17 @@ function detectFileType(buffer: Buffer): DetectedFile | null {
 
 export async function POST(request: Request) {
   try {
-    // 上传属于站点配置操作（Logo / OG 图等均由门户设置页写入），
-    // 因此要的是 config.manage 而非泛泛的后台准入 —— 只有内容编辑权的
-    // editor 能进后台，但不该改站点级资源。
     const session = await auth.api.getSession({ headers: request.headers });
     if (!session?.user) {
       return NextResponse.json({ error: '请先登录' }, { status: 401 });
     }
-    if (!userCan(session.user, 'config.manage')) {
+
+    // 先定出模块，再据此决定需要哪个权限点（见 lib/upload-modules）。
+    // 站点级资源要 config.manage，内容封面只要 content.manage。
+    const url = new URL(request.url);
+    const module = resolveUploadModule(url.searchParams.get('module'));
+
+    if (!userCan(session.user, MODULE_PERMISSIONS[module])) {
       return NextResponse.json({ error: '无权限' }, { status: 403 });
     }
     const rateLimitKey = session.user.id;
@@ -86,7 +89,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '请选择文件' }, { status: 400 });
     }
 
-    const url = new URL(request.url);
     const acceptParam = url.searchParams.get('accept') ?? 'image';
     const accept = ACCEPT_TYPES.includes(acceptParam as AcceptType)
       ? (acceptParam as AcceptType)
@@ -116,13 +118,6 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-
-    const moduleParam = url.searchParams.get('module') ?? 'misc';
-    const module = ALLOWED_MODULES.includes(
-      moduleParam as (typeof ALLOWED_MODULES)[number],
-    )
-      ? moduleParam
-      : 'misc';
 
     const fileName = `${Date.now()}-${nanoid()}.${detected.ext}`;
     // PDF 强制下载（避免浏览器内联渲染 + 潜在 PDF JS 引擎风险）；图片仍内联展示

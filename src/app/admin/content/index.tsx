@@ -101,8 +101,11 @@ function CoverField({
   onChange?: (url: string | null) => void;
 }) {
   return (
+    // module="content" 而非 "portal"：封面图属于内容而非站点级资源，
+    // 走 content.manage 权限，否则只有内容编辑权的 editor 传封面会 403。
+    // 见 app/api/upload/route.ts 的 MODULE_PERMISSIONS。
     <ImageUploader
-      module="portal"
+      module="content"
       onChange={(url) => onChange?.(url)}
       placeholder="上传封面"
       value={value}
