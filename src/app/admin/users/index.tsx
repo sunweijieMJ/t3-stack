@@ -1,16 +1,33 @@
 'use client';
 
 import { PlusOutlined } from '@ant-design/icons';
-import { App, Button, Form, Input, Modal, Table, Tag, Typography } from 'antd';
+import {
+  App,
+  Button,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Table,
+  Tag,
+  Typography,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { EllipsisCell } from '@/components/EllipsisCell';
 import { authClient } from '@/lib/auth-client';
 import type { AuthMethod } from '@/lib/auth-methods';
+import { ROLES } from '@/lib/rbac';
 import { api, type RouterOutputs } from '@/lib/trpc/react';
 
 const { Text } = Typography;
+
+const ROLE_LABELS: Record<(typeof ROLES)[number], string> = {
+  admin: '管理员',
+  editor: '编辑',
+  user: '普通用户',
+};
 
 type UserRow = RouterOutputs['sys']['listUsers'][number];
 
@@ -41,6 +58,14 @@ export default function AdminUsersView({ authMethod }: AdminUsersViewProps) {
       void utils.sys.listUsers.invalidate();
     },
     onError: (err) => message.error(err.message || '创建失败'),
+  });
+
+  const setRoleMutation = api.sys.setUserRole.useMutation({
+    onSuccess: () => {
+      message.success('已更新角色');
+      void utils.sys.listUsers.invalidate();
+    },
+    onError: (err) => message.error(err.message || '更新角色失败'),
   });
 
   const deleteMutation = api.sys.deleteUser.useMutation({
@@ -117,6 +142,31 @@ export default function AdminUsersView({ authMethod }: AdminUsersViewProps) {
       width: 200,
       ellipsis: { showTitle: false },
       render: (v: string | null) => <EllipsisCell value={v} />,
+    },
+    {
+      title: '角色',
+      dataIndex: 'role',
+      width: 150,
+      render: (role: string, row) => {
+        // 自己的角色不给改：服务端同样会拒（会失去 user.manage 后再也改不回来）。
+        // 白名单账号的角色由 ADMIN_EMAILS 决定，改库不生效，这里一并禁用并说明，
+        // 免得管理员改完以为生效了。
+        const isSelf = row.id === session?.user.id;
+        const disabled = isSelf || setRoleMutation.isPending;
+        return (
+          <Select<(typeof ROLES)[number]>
+            disabled={disabled}
+            onChange={(next) =>
+              setRoleMutation.mutate({ userId: row.id, role: next })
+            }
+            options={ROLES.map((r) => ({ value: r, label: ROLE_LABELS[r] }))}
+            size="small"
+            style={{ width: 120 }}
+            title={isSelf ? '不能修改自己的角色' : undefined}
+            value={role as (typeof ROLES)[number]}
+          />
+        );
+      },
     },
     {
       title: '创建时间',

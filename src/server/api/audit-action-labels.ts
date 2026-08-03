@@ -4,6 +4,7 @@ export const ACTION_LABELS: Record<string, string> = {
   // 系统管理（sys）
   'sys.createUser': '创建用户',
   'sys.deleteUser': '删除用户',
+  'sys.setUserRole': '修改用户角色',
   'sys.exportAuditLogs': '导出审计日志',
   'sys.purgeAuditLogs': '清理审计日志',
   'sys.setAuditPurgeConfig': '设置日志清理策略',

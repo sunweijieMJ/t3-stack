@@ -23,6 +23,13 @@ vi.mock('next/server', async (importOriginal) => {
   return { ...actual, after: (task: unknown) => void task };
 });
 
+// 审计中间件写的是模块级 db（非 ctx.db），必须一并导向测试库，
+// 否则失败的插入会在 teardown 期抛出未处理拒绝，见 helpers/mock-server-db。
+const { serverDbHolder, createServerDbProxy } = await vi.hoisted(async () => {
+  return await import('./helpers/mock-server-db');
+});
+vi.mock('@/server/db', () => ({ db: createServerDbProxy() }));
+
 /**
  * 构造一个直连 caller。
  *
@@ -86,6 +93,7 @@ describe('content router 权限', () => {
 
   beforeAll(async () => {
     ({ db, close } = await createTestDb());
+    serverDbHolder.db = db;
   });
   afterAll(async () => {
     await close();
@@ -132,6 +140,7 @@ describe('content router 正文净化', () => {
 
   beforeAll(async () => {
     ({ db, close } = await createTestDb());
+    serverDbHolder.db = db;
   });
   afterAll(async () => {
     await close();
@@ -172,6 +181,7 @@ describe('content router 门户读取', () => {
 
   beforeAll(async () => {
     ({ db, close } = await createTestDb());
+    serverDbHolder.db = db;
   });
   afterAll(async () => {
     await close();
@@ -270,6 +280,7 @@ describe('content router slug 约束', () => {
 
   beforeAll(async () => {
     ({ db, close } = await createTestDb());
+    serverDbHolder.db = db;
   });
   afterAll(async () => {
     await close();

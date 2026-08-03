@@ -22,6 +22,8 @@ export const PERMISSIONS = [
   'user.manage',
   'config.manage',
   'audit.read',
+  /** 清理日志、改保留策略等破坏性操作，与只读分开 */
+  'audit.manage',
   'content.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];

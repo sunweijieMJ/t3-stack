@@ -3,17 +3,25 @@ import { and, count, desc, eq, gte, ilike, lt, lte, min } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { after } from 'next/server';
 import { z } from 'zod';
+import { ROLES } from '@/lib/rbac';
 import { ACTION_LABELS } from '@/server/api/audit-action-labels';
-import { adminProcedure, createTRPCRouter } from '@/server/api/trpc';
+import { createTRPCRouter, permissionProcedure } from '@/server/api/trpc';
 import { auth } from '@/server/better-auth';
 import { user } from '@/server/db/auth-schema';
 import { adminAuditLog } from '@/server/db/schema';
-import { getUserRole } from '@/server/services/admin-check';
+import { getUserRole, isAdminEmail } from '@/server/services/admin-check';
 import {
   getAuditPurgeConfig,
   maybePurgeAuditLogs,
   setAuditPurgeConfig,
 } from '@/server/services/audit-purge';
+
+// 按权限点区分，而不是一律用「能进后台」。editor 拥有 admin.access（要进后台管内容），
+// 若这些接口继续挂在 admin.access 上，editor 就能创建/删除用户、读审计日志 ——
+// 一个只该改稿子的角色因此拿到了账号体系的控制权。
+const userProcedure = permissionProcedure('user.manage');
+const auditReadProcedure = permissionProcedure('audit.read');
+const auditManageProcedure = permissionProcedure('audit.manage');
 
 // 单次导出的行数上限，避免长期运行后全表扫描导致 OOM。
 // 命中上限时会通过返回值告知前端，由前端提示用户缩小范围分批导出——
@@ -53,7 +61,7 @@ function buildAuditLogWhere(input: {
 export const adminRouter = createTRPCRouter({
   // ---- 用户管理 ----
 
-  createUser: adminProcedure
+  createUser: userProcedure
     .input(
       z.object({
         email: z.email(),
@@ -96,7 +104,7 @@ export const adminRouter = createTRPCRouter({
       }
     }),
 
-  listUsers: adminProcedure.query(async ({ ctx }) => {
+  listUsers: userProcedure.query(async ({ ctx }) => {
     const rows = await ctx.db
       .select({
         id: user.id,
@@ -118,7 +126,62 @@ export const adminRouter = createTRPCRouter({
     });
   }),
 
-  deleteUser: adminProcedure
+  setUserRole: userProcedure
+    .input(z.object({ userId: z.string(), role: z.enum(ROLES) }))
+    .mutation(async ({ ctx, input }) => {
+      // 不能改自己：把自己降级会立刻失去 user.manage，再也改不回来。
+      // 这条同时也让「降级最后一个管理员」在实践中不可达 —— 有权改角色的
+      // 只有管理员，若库里只剩一个管理员，那个人必然就是操作者本人。
+      // 下面的剩余数量校验因此是防御性的第二道，别因为「测不到」就删掉。
+      if (input.userId === ctx.session.user.id) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: '不能修改自己的角色',
+        });
+      }
+
+      const [target] = await ctx.db
+        .select({ email: user.email, role: user.role })
+        .from(user)
+        .where(eq(user.id, input.userId))
+        .limit(1);
+      if (!target) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '用户不存在' });
+      }
+
+      // 白名单账号的角色由环境变量决定（见 lib/rbac 的 resolveRole），改库不生效。
+      // 静默写入会让管理员以为降级成功、实际对方仍是管理员，不如直接拒绝并说明。
+      if (isAdminEmail(target.email) && input.role !== 'admin') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message:
+            '该账号的邮箱在 ADMIN_EMAILS 白名单中，角色由环境变量决定，需先将其移出白名单。',
+        });
+      }
+
+      if (getUserRole(target) === 'admin' && input.role !== 'admin') {
+        const rows = await ctx.db
+          .select({ email: user.email, role: user.role })
+          .from(user);
+        const adminCount = rows.filter(
+          (r) => getUserRole(r) === 'admin',
+        ).length;
+        if (adminCount <= 1) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: '这是最后一个管理员账号，降级后将无人能进入后台。',
+          });
+        }
+      }
+
+      await ctx.db
+        .update(user)
+        .set({ role: input.role })
+        .where(eq(user.id, input.userId));
+      return { success: true };
+    }),
+
+  deleteUser: userProcedure
     .input(z.object({ userId: z.string() }))
     .mutation(async ({ ctx, input }) => {
       if (input.userId === ctx.session?.user.id) {
@@ -166,7 +229,7 @@ export const adminRouter = createTRPCRouter({
   // ---- 审计日志 ----
 
   // 获取数据库中实际存在的操作类型列表（附带中文名）
-  listDistinctActions: adminProcedure.query(async ({ ctx }) => {
+  listDistinctActions: auditReadProcedure.query(async ({ ctx }) => {
     const rows = await ctx.db
       .selectDistinct({ action: adminAuditLog.action })
       .from(adminAuditLog)
@@ -177,7 +240,7 @@ export const adminRouter = createTRPCRouter({
     }));
   }),
 
-  listAuditLogs: adminProcedure
+  listAuditLogs: auditReadProcedure
     .input(
       z.object({
         page: z.number().min(1).default(1),
@@ -207,7 +270,7 @@ export const adminRouter = createTRPCRouter({
     }),
 
   // 导出审计日志（返回全量数据，前端转 Excel）；改为 mutation 以走 auditMiddleware 留痕
-  exportAuditLogs: adminProcedure
+  exportAuditLogs: auditManageProcedure
     .input(
       z.object({
         startDate: z.iso.datetime().optional(),
@@ -236,7 +299,7 @@ export const adminRouter = createTRPCRouter({
   // ---- 审计日志清理 ----
 
   // 日志统计（总数 + 最早记录时间）；顺手触发懒清理（24h 频次保护，失败已被 service 自吞）
-  getAuditLogStats: adminProcedure.query(async ({ ctx }) => {
+  getAuditLogStats: auditReadProcedure.query(async ({ ctx }) => {
     // after() 而非裸 void：Serverless 下响应返回即冻结实例，未保活的清理任务会被
     // 丢弃，自动清理将永远不生效（且无任何报错）。standalone 下行为不变。
     after(maybePurgeAuditLogs());
@@ -253,11 +316,11 @@ export const adminRouter = createTRPCRouter({
   }),
 
   // 自动清理配置（默认开启，保留 90 天）
-  getAuditPurgeConfig: adminProcedure.query(async () => {
+  getAuditPurgeConfig: auditReadProcedure.query(async () => {
     return getAuditPurgeConfig();
   }),
 
-  setAuditPurgeConfig: adminProcedure
+  setAuditPurgeConfig: auditManageProcedure
     .input(
       z.object({
         enabled: z.boolean(),
@@ -270,7 +333,7 @@ export const adminRouter = createTRPCRouter({
     }),
 
   // 手动清理指定日期之前的日志
-  purgeAuditLogs: adminProcedure
+  purgeAuditLogs: auditManageProcedure
     .input(
       z.object({
         // 与本文件其他日期入参保持一致的写法（z.string().datetime() 等价但不统一）

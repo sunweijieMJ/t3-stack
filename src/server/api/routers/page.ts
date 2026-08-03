@@ -16,9 +16,13 @@ import {
   FRONTEND_CONFIG_TAG,
 } from '@/server/services/config';
 import { deleteFile } from '@/server/services/storage';
-import { adminProcedure, createTRPCRouter } from '../trpc';
+import { createTRPCRouter, permissionProcedure } from '../trpc';
 
 const frontendConfigInput = buildFrontendConfigZod(frontendConfigSchema);
+
+// 门户配置属于站点级设置，要的是 config.manage 而非泛泛的后台准入 ——
+// 只有内容编辑权的 editor 能进后台，但不该改站点标题、Logo、主题色。
+const configProcedure = permissionProcedure('config.manage');
 
 /**
  * 删除「旧配置引用、新配置不再引用」的上传文件。
@@ -39,7 +43,7 @@ function purgeOrphanAssets(oldValue: unknown, newValue: unknown): void {
 
 export const pageRouter = createTRPCRouter({
   // 读取前端配置：同时返回 updatedAt 作为乐观锁的版本号
-  getFrontendConfig: adminProcedure.query(async ({ ctx }) => {
+  getFrontendConfig: configProcedure.query(async ({ ctx }) => {
     const [row] = await ctx.db
       .select({
         value: systemConfig.value,
@@ -56,7 +60,7 @@ export const pageRouter = createTRPCRouter({
 
   // 保存前端配置（乐观锁）：客户端必须回传读取时拿到的 updatedAt，
   // 不匹配 → 说明被他人改过，抛 CONFLICT 让前端刷新；首次保存允许 expectedUpdatedAt=null。
-  saveFrontendConfig: adminProcedure
+  saveFrontendConfig: configProcedure
     .input(
       z.object({
         value: frontendConfigInput,
