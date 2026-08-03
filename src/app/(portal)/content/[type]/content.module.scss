@@ -1,0 +1,138 @@
+.wrap {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 120px 24px 96px;
+}
+
+.heading {
+  margin: 0 0 32px;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.empty {
+  color: #8c8c8c;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item + .item {
+  border-top: 1px solid rgb(0 0 0 / 8%);
+}
+
+.itemLink {
+  display: flex;
+  gap: 24px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 24px 0;
+  color: inherit;
+  text-decoration: none;
+
+  &:hover .itemTitle {
+    color: var(--portal-primary);
+  }
+}
+
+.itemMain {
+  min-width: 0;
+}
+
+.itemTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+.pin {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--portal-primary);
+  color: #fff;
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+.itemSummary {
+  margin: 8px 0 0;
+  color: #595959;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.itemDate,
+.detailDate {
+  flex-shrink: 0;
+  color: #8c8c8c;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.detailDate {
+  display: block;
+  margin-bottom: 32px;
+}
+
+.pager {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 48px;
+  font-size: 14px;
+
+  a {
+    color: var(--portal-primary);
+    text-decoration: none;
+  }
+}
+
+.body {
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+// 正文由富文本编辑器产出，类名不受本模块控制，必须用 :global 逐个选中。
+// 注意只能用 :global(选择器) 函数形式 —— Next 的 CSS Modules 解析器不接受
+// `:global { ... }` 嵌套块，会在构建期报语法错误。
+.body :global(h1),
+.body :global(h2),
+.body :global(h3) {
+  margin: 32px 0 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.body :global(p) {
+  margin: 0 0 16px;
+}
+
+.body :global(ul),
+.body :global(ol) {
+  margin: 0 0 16px;
+  padding-left: 24px;
+}
+
+.body :global(a) {
+  color: var(--portal-primary);
+}
+
+.body :global(img) {
+  max-width: 100%;
+  height: auto;
+}
+
+.body :global(blockquote) {
+  margin: 16px 0;
+  padding-left: 16px;
+  border-left: 3px solid rgb(0 0 0 / 12%);
+  color: #595959;
+}
