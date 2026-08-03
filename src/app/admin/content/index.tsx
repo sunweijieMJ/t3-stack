@@ -29,6 +29,8 @@ import { ROLES } from '@/lib/rbac';
 import { api, type RouterOutputs } from '@/lib/trpc/react';
 
 type ContentRow = RouterOutputs['content']['list']['rows'][number];
+/** byId 返回的完整记录（含正文），编辑抽屉用它 */
+type ContentDetail = RouterOutputs['content']['byId'];
 
 /** 实际状态 → 展示样式。与 resolveContentState 的返回值一一对应 */
 const STATE_META: Record<ContentState, { color: string; label: string }> = {
@@ -105,7 +107,7 @@ export default function AdminContentView() {
 
   const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState('');
-  const [editing, setEditing] = useState<ContentRow | null>(null);
+  const [editing, setEditing] = useState<ContentDetail | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const pageSize = 20;
@@ -153,21 +155,24 @@ export default function AdminContentView() {
     setDrawerOpen(true);
   };
 
-  const openEdit = (row: ContentRow) => {
-    setEditing(row);
+  // 必须按 id 重新取完整记录：列表接口不再返回 body（正文太大，见 router 里的
+  // 说明），直接拿列表行填表单会让正文变成空字符串，一保存就把内容清空。
+  const openEdit = async (row: ContentRow) => {
+    const full = await utils.content.byId.fetch({ id: row.id });
+    setEditing(full);
     form.setFieldsValue({
-      type: row.type,
-      slug: row.slug,
-      title: row.title,
-      summary: row.summary ?? undefined,
-      body: row.body,
-      status: row.status as EditorForm['status'],
-      publishedAt: row.publishedAt ? dayjs(row.publishedAt) : null,
-      unpublishedAt: row.unpublishedAt ? dayjs(row.unpublishedAt) : null,
-      visibleRoles: row.visibleRoles,
-      pinned: row.pinned,
-      categoryId: row.categoryId,
-      coverImage: row.coverImage,
+      type: full.type,
+      slug: full.slug,
+      title: full.title,
+      summary: full.summary ?? undefined,
+      body: full.body,
+      status: full.status as EditorForm['status'],
+      publishedAt: full.publishedAt ? dayjs(full.publishedAt) : null,
+      unpublishedAt: full.unpublishedAt ? dayjs(full.unpublishedAt) : null,
+      visibleRoles: full.visibleRoles,
+      pinned: full.pinned,
+      categoryId: full.categoryId,
+      coverImage: full.coverImage,
     });
     setDrawerOpen(true);
   };
@@ -256,7 +261,13 @@ export default function AdminContentView() {
       width: 130,
       render: (_, row) => (
         <Space size="small">
-          <Button onClick={() => openEdit(row)} size="small" type="link">
+          <Button
+            onClick={() => {
+              void openEdit(row);
+            }}
+            size="small"
+            type="link"
+          >
             编辑
           </Button>
           <Button

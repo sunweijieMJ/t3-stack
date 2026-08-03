@@ -82,7 +82,23 @@ export const contentRouter = createTRPCRouter({
 
       const [rows, totalResult] = await Promise.all([
         ctx.db
-          .select()
+          // 显式列出字段，不能用 select()：正文是完整富文本 HTML，
+          // 一页 20 条全带上会让列表接口的响应体膨胀到不可接受，而列表
+          // 一个字都不显示正文。编辑时由 byId 单独取完整记录。
+          .select({
+            id: content.id,
+            type: content.type,
+            slug: content.slug,
+            title: content.title,
+            summary: content.summary,
+            categoryId: content.categoryId,
+            status: content.status,
+            publishedAt: content.publishedAt,
+            unpublishedAt: content.unpublishedAt,
+            visibleRoles: content.visibleRoles,
+            pinned: content.pinned,
+            updatedAt: content.updatedAt,
+          })
           .from(content)
           .where(where)
           .orderBy(desc(content.updatedAt))
