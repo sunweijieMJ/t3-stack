@@ -9,6 +9,11 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     passWithNoTests: true,
+    // 默认 5s 不够：DB 测试要在 beforeAll 里启动 PGlite（把 Postgres 编译成 WASM
+    // 跑在进程内），冷启动实测约 5-6s，正好卡在默认超时线上。
+    // 这个值只影响单个用例的上限，纯逻辑测试仍然是毫秒级返回，不会因此变慢。
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     include: ['tests/**/*.{test,spec}.{ts,tsx}'],
     setupFiles: ['./tests/setup.ts'],
     coverage: {
