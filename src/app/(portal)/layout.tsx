@@ -6,6 +6,7 @@ import { PortalFooter } from '@/components/PortalFooter';
 import { PortalHeader } from '@/components/PortalHeader';
 import { PortalStickyNav } from '@/components/PortalStickyNav';
 import { pickI18nText } from '@/lib/i18n-text';
+import { resolveNavItems } from '@/lib/nav-items';
 import { getDefaultLang, getFrontendConfig } from '@/server/services/config';
 
 // portal 整体走 ISR：所有页面继承 60s revalidate（admin 改完最坏 60s 见效）。
@@ -26,6 +27,9 @@ export default async function PortalLayout({
   // 之前两处都硬编码 'Site'，后台「门户设置」里的站点标题与 Logo 改了没有任何反应。
   const siteName = pickI18nText(cfg.basic?.systemTitle, lang, 'Site');
   const logoImage = cfg.basic?.logoImage || undefined;
+  // 在服务端过滤：导航项由管理员自由填写，会直接进 <a href>，
+  // 不安全的协议在这里就丢掉，客户端组件拿到的已经是可信列表。
+  const navItems = resolveNavItems(cfg.nav?.items);
 
   return (
     <div
@@ -39,7 +43,7 @@ export default async function PortalLayout({
     >
       <PortalHeader logoImage={logoImage} siteName={siteName} />
       <main>{children}</main>
-      <PortalStickyNav siteName={siteName} />
+      <PortalStickyNav navItems={navItems} siteName={siteName} />
       <PortalFooter />
     </div>
   );

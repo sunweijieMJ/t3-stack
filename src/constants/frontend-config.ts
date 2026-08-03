@@ -53,6 +53,37 @@ export const frontendConfigSchema = {
       },
     },
   },
+  nav: {
+    type: 'object',
+    title: '导航菜单',
+    description: '门户顶部导航；不配置则不显示导航栏',
+    properties: {
+      items: {
+        type: 'array',
+        title: '菜单项',
+        description:
+          '链接支持站内路径（以 / 开头，如 /content/news）与 http(s) 外链；其他协议会被丢弃',
+        span: 24,
+        items: {
+          type: 'object',
+          title: '菜单项',
+          properties: {
+            label: {
+              type: 'string',
+              title: '名称',
+              defaultValue: '',
+            },
+            href: {
+              type: 'string',
+              title: '链接',
+              defaultValue: '',
+            },
+          },
+        },
+        defaultValue: [],
+      },
+    },
+  },
   seo: {
     type: 'object',
     title: 'SEO 配置',

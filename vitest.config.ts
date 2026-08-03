@@ -25,12 +25,14 @@ export default defineConfig({
       // 是真的。router、组件、storage / email / config 等需要集成测试或 mock 大量 IO，
       // 故意不纳入门禁，免得为了凑数写一堆无意义的浅测试。新增纯函数模块请加到这里。
       include: [
+        'src/lib/admin-menu.ts',
         'src/lib/auth-error.ts',
         'src/lib/auth-methods.ts',
         'src/lib/content-html.ts',
         'src/lib/content-visibility.ts',
         'src/lib/frontend-config.ts',
         'src/lib/i18n-text.ts',
+        'src/lib/nav-items.ts',
         'src/lib/rbac.ts',
         'src/lib/safe-path.ts',
         'src/server/db/pg-error.ts',

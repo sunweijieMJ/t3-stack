@@ -2,9 +2,16 @@
 
 import { useEffect, useRef } from 'react';
 import { PortalNav } from '@/components/PortalNav';
+import type { NavItem } from '@/lib/nav-items';
 import styles from './index.module.scss';
 
-export function PortalStickyNav({ siteName }: { siteName: string }) {
+export function PortalStickyNav({
+  siteName,
+  navItems,
+}: {
+  siteName: string;
+  navItems: NavItem[];
+}) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const lastScrollY = useRef(0);
   const isVisible = useRef(false);
@@ -70,7 +77,7 @@ export function PortalStickyNav({ siteName }: { siteName: string }) {
 
   return (
     <div className={styles.wrapper} ref={wrapperRef}>
-      <PortalNav siteName={siteName} />
+      <PortalNav items={navItems} siteName={siteName} />
     </div>
   );
 }
