@@ -9,6 +9,7 @@ import {
   collectAssetUrls,
   type FrontendConfig,
 } from '@/lib/frontend-config';
+import { isUniqueViolation } from '@/server/db/pg-error';
 import { systemConfig } from '@/server/db/schema';
 import {
   FRONTEND_CONFIG_KEY,
@@ -18,18 +19,6 @@ import { deleteFile } from '@/server/services/storage';
 import { adminProcedure, createTRPCRouter } from '../trpc';
 
 const frontendConfigInput = buildFrontendConfigZod(frontendConfigSchema);
-
-/**
- * PG 唯一约束冲突（SQLSTATE 23505）。postgres.js 把服务端错误码放在 err.code 上，
- * 但抛出的不一定是 Error 实例，所以这里按结构而非 instanceof 判断。
- */
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    (err as { code?: unknown }).code === '23505'
-  );
-}
 
 /**
  * 删除「旧配置引用、新配置不再引用」的上传文件。

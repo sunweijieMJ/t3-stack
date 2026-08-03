@@ -48,9 +48,11 @@ export const contentCategory = createTable(
  * 判定，而三份可见性判定迟早会各自跑偏。加一种内容在这里只是多一个 type 值。
  *
  * body 存净化后的 HTML，净化在写入侧完成（见 lib/content-html.ts）。
- * status / publishedAt / unpublishedAt / visibleRoles 的组合语义见
- * lib/content-visibility.ts，读取侧一律走那里的判定函数，不要在 SQL 里
- * 各写一份时间比较。
+ * status / publishedAt / unpublishedAt / visibleRoles 的组合语义定义在
+ * lib/content-visibility.ts。单行判定用那里的纯函数；列表查询要分页，必须
+ * 在 SQL 里过滤，走 services/content-query 的 visibleContentWhere。两者是
+ * 同一套语义的两份实现，由 tests/content-query 的交叉验证保证不跑偏 ——
+ * 改可见性规则时两处都要改。
  */
 export const content = createTable(
   'content',

@@ -33,6 +33,7 @@ export default defineConfig({
         'src/lib/i18n-text.ts',
         'src/lib/rbac.ts',
         'src/lib/safe-path.ts',
+        'src/server/db/pg-error.ts',
         'src/server/services/get-client-ip.ts',
       ],
       thresholds: {

@@ -78,6 +78,12 @@ const t = initTRPC.context<typeof createTRPCContext>().create({
 export const createTRPCRouter = t.router;
 
 /**
+ * 直连调用工厂：绕过 HTTP 直接调 router，用于集成测试，也是将来在
+ * Server Component 里调 tRPC 的入口（见 root.ts 末尾的说明）。
+ */
+export const createCallerFactory = t.createCallerFactory;
+
+/**
  * Public (unauthenticated) procedure
  *
  * This is the base piece you use to build new queries and mutations on your tRPC API. It does not

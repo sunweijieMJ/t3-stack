@@ -10,4 +10,9 @@ export const ACTION_LABELS: Record<string, string> = {
 
   // 门户配置（page）
   'page.saveFrontendConfig': '保存门户配置',
+
+  // 内容管理（content）
+  'content.create': '创建内容',
+  'content.update': '更新内容',
+  'content.delete': '删除内容',
 };
