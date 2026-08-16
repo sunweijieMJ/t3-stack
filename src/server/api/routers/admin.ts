@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, gte, ilike, lt, lte, min } from 'drizzle-orm';
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { nanoid } from 'nanoid';
 import { after } from 'next/server';
 import { z } from 'zod';
@@ -8,6 +9,7 @@ import { ACTION_LABELS } from '@/server/api/audit-action-labels';
 import { createTRPCRouter, permissionProcedure } from '@/server/api/trpc';
 import { auth } from '@/server/better-auth';
 import { user } from '@/server/db/auth-schema';
+import type * as schema from '@/server/db/schema';
 import { adminAuditLog } from '@/server/db/schema';
 import { getUserRole, isAdminEmail } from '@/server/services/admin-check';
 import {
@@ -31,6 +33,33 @@ const AUDIT_EXPORT_LIMIT = 10_000;
 // 转义 LIKE/ILIKE 通配符，避免用户输入 % / _ 把过滤变成全表匹配
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
+
+type UserTx = Parameters<
+  Parameters<PostgresJsDatabase<typeof schema>['transaction']>[0]
+>[0];
+
+/**
+ * 在事务内统计管理员数量，并锁住参与统计的行。
+ *
+ * FOR UPDATE 不能省。原先是「先 select 数一遍，再 update/delete」两步裸奔，
+ * 中间没有事务也没有行锁：只剩 A、B 两个管理员时，A 删 B 与 B 删 A 并发到达，
+ * 两边各自读到 adminCount = 2 → 都通过校验 → 两条 delete 都执行 → 库里 0 个管理员。
+ * 若 ADMIN_EMAILS 又是空的，就再没有任何途径能进后台，只能手工改库 ——
+ * 而这正是这道校验存在的意义。加锁后第二个事务会阻塞到第一个提交，
+ * 醒来重新统计时看到的是已经变成 1 的真实值，于是被正确拒绝。
+ *
+ * 统计口径必须走 getUserRole 而不是只看 role 列：白名单里的账号即使库里写着 'user'
+ * 也是管理员。这也是这里不把判定改写成一条 SQL count 的原因 —— 那等于把
+ * ADMIN_EMAILS 的合并规则再实现一遍，两份逻辑迟早漂移。user 表规模很小，
+ * 全表锁定的代价可以接受。
+ */
+async function countAdminsLocked(tx: UserTx): Promise<number> {
+  const rows = await tx
+    .select({ email: user.email, role: user.role })
+    .from(user)
+    .for('update');
+  return rows.filter((r) => getUserRole(r) === 'admin').length;
 }
 
 // 构建审计日志查询的 where 条件（listAuditLogs 和 exportAuditLogs 共用）
@@ -140,44 +169,42 @@ export const adminRouter = createTRPCRouter({
         });
       }
 
-      const [target] = await ctx.db
-        .select({ email: user.email, role: user.role })
-        .from(user)
-        .where(eq(user.id, input.userId))
-        .limit(1);
-      if (!target) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: '用户不存在' });
-      }
-
-      // 白名单账号的角色由环境变量决定（见 lib/rbac 的 resolveRole），改库不生效。
-      // 静默写入会让管理员以为降级成功、实际对方仍是管理员，不如直接拒绝并说明。
-      if (isAdminEmail(target.email) && input.role !== 'admin') {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message:
-            '该账号的邮箱在 ADMIN_EMAILS 白名单中，角色由环境变量决定，需先将其移出白名单。',
-        });
-      }
-
-      if (getUserRole(target) === 'admin' && input.role !== 'admin') {
-        const rows = await ctx.db
+      // 统计与写入必须在同一个事务里，否则并发降级会绕过「最后一个管理员」保护，
+      // 见 countAdminsLocked 的说明。
+      await ctx.db.transaction(async (tx) => {
+        const [target] = await tx
           .select({ email: user.email, role: user.role })
-          .from(user);
-        const adminCount = rows.filter(
-          (r) => getUserRole(r) === 'admin',
-        ).length;
-        if (adminCount <= 1) {
+          .from(user)
+          .where(eq(user.id, input.userId))
+          .limit(1);
+        if (!target) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '用户不存在' });
+        }
+
+        // 白名单账号的角色由环境变量决定（见 lib/rbac 的 resolveRole），改库不生效。
+        // 静默写入会让管理员以为降级成功、实际对方仍是管理员，不如直接拒绝并说明。
+        if (isAdminEmail(target.email) && input.role !== 'admin') {
           throw new TRPCError({
             code: 'FORBIDDEN',
-            message: '这是最后一个管理员账号，降级后将无人能进入后台。',
+            message:
+              '该账号的邮箱在 ADMIN_EMAILS 白名单中，角色由环境变量决定，需先将其移出白名单。',
           });
         }
-      }
 
-      await ctx.db
-        .update(user)
-        .set({ role: input.role })
-        .where(eq(user.id, input.userId));
+        if (getUserRole(target) === 'admin' && input.role !== 'admin') {
+          if ((await countAdminsLocked(tx)) <= 1) {
+            throw new TRPCError({
+              code: 'FORBIDDEN',
+              message: '这是最后一个管理员账号，降级后将无人能进入后台。',
+            });
+          }
+        }
+
+        await tx
+          .update(user)
+          .set({ role: input.role })
+          .where(eq(user.id, input.userId));
+      });
       return { success: true };
     }),
 
@@ -196,33 +223,30 @@ export const adminRouter = createTRPCRouter({
       // A 删 B、B 删 A，最后谁都进不去 —— 无论管理员身份来自 ADMIN_EMAILS 白名单
       // 还是 user.role，前提都是该邮箱在 user 表里**有对应账号**，账号没了就登不上。
       // 这里在删之前数一遍剩余的管理员账号，只剩一个就拒绝。
-      // 统计口径必须走 getUserRole 而非只看 role 列：白名单里的账号即使库里
-      // 写着 'user' 也是管理员，漏算会把「删掉最后一个管理员」放行。
-      const [target] = await ctx.db
-        .select({ email: user.email, role: user.role })
-        .from(user)
-        .where(eq(user.id, input.userId))
-        .limit(1);
-      if (!target) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: '用户不存在' });
-      }
-      if (getUserRole(target) === 'admin') {
-        const rows = await ctx.db
+      //
+      // 整段放进事务并对统计加行锁：这两个请求真并发时，不加锁的话双方都会读到
+      // adminCount = 2 而各自放行，恰好把这道校验要防的事做成（见 countAdminsLocked）。
+      await ctx.db.transaction(async (tx) => {
+        const [target] = await tx
           .select({ email: user.email, role: user.role })
-          .from(user);
-        const adminCount = rows.filter(
-          (r) => getUserRole(r) === 'admin',
-        ).length;
-        if (adminCount <= 1) {
-          throw new TRPCError({
-            code: 'FORBIDDEN',
-            message:
-              '这是最后一个管理员账号，删除后将无人能进入后台。请先创建另一个管理员账号（把角色设为 admin，或把邮箱加入 ADMIN_EMAILS 白名单）。',
-          });
+          .from(user)
+          .where(eq(user.id, input.userId))
+          .limit(1);
+        if (!target) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '用户不存在' });
         }
-      }
+        if (getUserRole(target) === 'admin') {
+          if ((await countAdminsLocked(tx)) <= 1) {
+            throw new TRPCError({
+              code: 'FORBIDDEN',
+              message:
+                '这是最后一个管理员账号，删除后将无人能进入后台。请先创建另一个管理员账号（把角色设为 admin，或把邮箱加入 ADMIN_EMAILS 白名单）。',
+            });
+          }
+        }
 
-      await ctx.db.delete(user).where(eq(user.id, input.userId));
+        await tx.delete(user).where(eq(user.id, input.userId));
+      });
       return { success: true };
     }),
 
