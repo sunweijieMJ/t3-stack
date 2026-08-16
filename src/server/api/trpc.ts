@@ -113,11 +113,42 @@ export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
 });
 
 /**
- * 对输入参数进行脱敏，移除密码、token 等敏感字段。
+ * 审计入参的体积上界。
+ *
+ * 不设上界会出事：content.create / update 走的是同一条审计路径，而正文是完整的
+ * 富文本 HTML（routers/content.ts 里明确不限制正文长度）。一篇 2MB 的内容保存一次，
+ * 审计表就多一行 2MB 的 jsonb —— 内容本体已经存了一份，这是第二份；打开审计页时
+ * listAuditLogs 一页 20 行会把它们全部取回并经 superjson 序列化；导出接口上限
+ * 10000 行，同一个问题被放大 500 倍。而审计要的只是「谁改了哪篇」，不是正文副本。
+ *
+ * 截断而不是整个丢弃 input：短入参（改角色、删用户、清理日志）才是审计的主要价值，
+ * 它们本来就远小于这个上界，不受影响。
  */
-function sanitizeInput(input: unknown): unknown {
+const MAX_AUDIT_STRING_LEN = 2048;
+const MAX_AUDIT_ARRAY_LEN = 100;
+/** 防御畸形/递归结构，避免脱敏本身成为一个可被入参撑爆的递归 */
+const MAX_AUDIT_DEPTH = 8;
+
+/**
+ * 对输入参数进行脱敏，移除密码、token 等敏感字段，并把体积压到可控范围。
+ */
+function sanitizeInput(input: unknown, depth = 0): unknown {
+  if (typeof input === 'string') {
+    return input.length > MAX_AUDIT_STRING_LEN
+      ? `${input.slice(0, MAX_AUDIT_STRING_LEN)}…[已截断，原长 ${input.length}]`
+      : input;
+  }
   if (!input || typeof input !== 'object') return input;
-  if (Array.isArray(input)) return input.map(sanitizeInput);
+  if (depth >= MAX_AUDIT_DEPTH) return '[嵌套过深，已省略]';
+  if (Array.isArray(input)) {
+    const kept = input
+      .slice(0, MAX_AUDIT_ARRAY_LEN)
+      .map((v) => sanitizeInput(v, depth + 1));
+    if (input.length > MAX_AUDIT_ARRAY_LEN) {
+      kept.push(`…[还有 ${input.length - MAX_AUDIT_ARRAY_LEN} 项，已省略]`);
+    }
+    return kept;
+  }
   // 子串匹配，覆盖 newPassword / confirmPassword / apiToken 等驼峰命名。
   // 注意：不要用 endsWith('code')，会误伤 zipCode / countryCode / errorCode /
   // productCode 等业务字段。验证码用更精确的命名匹配：verificationCode /
@@ -131,7 +162,7 @@ function sanitizeInput(input: unknown): unknown {
       sensitivePatterns.some((p) => lower.includes(p)) ||
       exactSensitiveKeys.has(lower) ||
       /(?:verif(?:y|ication)|auth|otp)code$/.test(lower);
-    sanitized[key] = isSensitive ? '***' : sanitizeInput(value);
+    sanitized[key] = isSensitive ? '***' : sanitizeInput(value, depth + 1);
   }
   return sanitized;
 }
