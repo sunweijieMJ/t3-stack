@@ -178,8 +178,9 @@ export default function AdminAuditLogsView() {
 
   const openConfig = () => {
     setConfigOpen(true);
-    // 表单初始值由 Modal 内部的 Form 通过 key={dataUpdatedAt} 在 query 数据到达后重挂时填充，
-    // 配合 Modal 的 destroyOnHidden 保证下次打开时是全新的 Form 实例
+    // 表单初始值由 Modal 内部的 Form 在挂载时从 initialValues 读取；Modal 的
+    // destroyOnHidden 保证每次打开都是全新实例，因此读到的就是当下的最新配置。
+    // 若打开时数据尚未到达，Form 的 key 会在数据首次到达时触发一次重挂补上（见下方）。
   };
 
   const handleConfigSubmit = () => {
@@ -413,7 +414,15 @@ export default function AdminAuditLogsView() {
             enabled: purgeConfigQuery.data?.enabled ?? true,
             retentionDays: purgeConfigQuery.data?.retentionDays ?? 90,
           }}
-          key={purgeConfigQuery.dataUpdatedAt}
+          // key 只区分「数据到了没」，不能用 dataUpdatedAt。
+          // dataUpdatedAt 每次请求成功都会变（与数据是否变化无关），而
+          // refetchOnWindowFocus 是 react-query 的默认值 —— 管理员把保留天数从 90
+          // 改成 30、切到别的窗口再切回来，Form 就整体重挂、输入框跳回 90，
+          // 没有任何提示，接着点「确定」保存的是 90。属于静默写错数据。
+          // 用当前这个 key：数据首次到达时重挂一次（补上 initialValues），
+          // 之后的后台刷新一律不动表单；Modal 的 destroyOnHidden 已保证
+          // 每次重新打开都是全新实例，读到的是那一刻的最新值。
+          key={purgeConfigQuery.data ? 'loaded' : 'loading'}
           labelCol={{ span: 7 }}
           wrapperCol={{ span: 14 }}
         >
