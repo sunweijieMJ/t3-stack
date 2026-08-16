@@ -168,7 +168,12 @@ export const frontendConfigSchema = {
       copyright: {
         type: 'string',
         title: '版权信息',
-        defaultValue: '© 2026. All Rights Reserved.',
+        // 留空即可，PortalFooter 会自动填「© <当前年份>. All Rights Reserved.」
+        description: '留空则自动显示当前年份',
+        // 默认值必须是空串：这里一旦写上具体文案，mergeConfig 就会把它填进每一份
+        // 配置，PortalFooter 里 `footer.copyright || \`© ${当前年份}\`` 的兜底分支
+        // 就永远不执行 —— 跨年后整站页脚继续显示旧年份，而且没有任何人会收到报错。
+        defaultValue: '',
         span: 24,
       },
       icp: {
