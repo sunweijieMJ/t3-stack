@@ -9,7 +9,13 @@ import {
 } from 'vitest';
 import type { Role } from '@/lib/rbac';
 import { createCaller } from '@/server/api/root';
+import { getSession } from '@/server/better-auth/server';
 import { content, systemConfig, user } from '@/server/db/schema';
+import {
+  getPublishedContentBySlug,
+  listPublishedContent,
+} from '@/server/services/content-public';
+import { deleteFile } from '@/server/services/storage';
 import { createTestDb, resetDb, type TestDb } from './helpers/db';
 
 // 审计中间件用 next/server 的 after() 把日志写入保活到响应之后，而 after() 要求
@@ -29,6 +35,19 @@ const { serverDbHolder, createServerDbProxy } = await vi.hoisted(async () => {
   return await import('./helpers/mock-server-db');
 });
 vi.mock('@/server/db', () => ({ db: createServerDbProxy() }));
+
+// 门户读取走 services/content-public（门户页面是 RSC，直接调 service，不经 tRPC）。
+// 它通过 getSession() 从登录态推导访问者角色 —— 角色绝不能由入参传入，否则任何人
+// 拼一个 role=editor 就能读到定向内容。这里替换掉这一个导出来控制访问者身份，
+// 顺带避免把整条 better-auth + env 依赖链拉进单测。
+vi.mock('@/server/better-auth/server', () => ({
+  getSession: vi.fn(async () => null),
+}));
+
+// 封面回收会真的去碰文件系统 / OSS，单测里只关心「有没有按正确的参数调用」。
+vi.mock('@/server/services/storage', () => ({
+  deleteFile: vi.fn(async () => undefined),
+}));
 
 /**
  * 构造一个直连 caller。
@@ -193,9 +212,19 @@ describe('content router 正文净化', () => {
   });
 });
 
-describe('content router 门户读取', () => {
+// 打的是 services/content-public —— 门户页面实际调用的就是这一份。
+// 早先这些用例走的是 content router 上的 listPublished / bySlug，那两个 procedure
+// 运行时零调用点，测它们等于测了一份没人跑的代码（两份实现当时已经开始漂移）。
+describe('门户读取（services/content-public）', () => {
   let db: TestDb;
   let close: () => Promise<void>;
+
+  /** 设定当前访问者；null 表示未登录访客 */
+  const asViewer = (u: { id: string; email: string; role: Role } | null) => {
+    vi.mocked(getSession).mockResolvedValue(
+      u ? ({ user: u } as never) : (null as never),
+    );
+  };
 
   beforeAll(async () => {
     ({ db, close } = await createTestDb());
@@ -212,8 +241,9 @@ describe('content router 门户读取', () => {
 
   it('草稿不出现在门户列表里', async () => {
     await callerFor(db, ADMIN).content.create(draft);
+    asViewer(null);
 
-    const res = await callerFor(db, null).content.listPublished({
+    const res = await listPublishedContent({
       type: 'news',
       page: 1,
       pageSize: 10,
@@ -227,8 +257,9 @@ describe('content router 门户读取', () => {
       ...draft,
       status: 'published',
     });
+    asViewer(null);
 
-    const res = await callerFor(db, null).content.listPublished({
+    const res = await listPublishedContent({
       type: 'news',
       page: 1,
       pageSize: 10,
@@ -253,8 +284,9 @@ describe('content router 门户读取', () => {
       pinned: true,
       ...publish,
     });
+    asViewer(null);
 
-    const res = await callerFor(db, null).content.listPublished({
+    const res = await listPublishedContent({
       type: 'news',
       page: 1,
       pageSize: 10,
@@ -263,18 +295,22 @@ describe('content router 门户读取', () => {
     expect(res.rows[0]?.title).toBe('置顶');
   });
 
-  it('定向内容对未命中角色返回 NOT_FOUND 而非 FORBIDDEN，避免探测', async () => {
+  it('定向内容对未命中角色不可见，且与「不存在」无法区分', async () => {
     await callerFor(db, ADMIN).content.create({
       ...draft,
       status: 'published',
       visibleRoles: ['editor'],
     });
+    asViewer(PLAIN);
 
-    // 断言 code 而非 message：不可见与不存在必须落到同一个 NOT_FOUND，
-    // 一旦有人改成 FORBIDDEN，这个接口就变成了「slug 是否存在」的探测器。
+    // 两者必须落到完全相同的结果（null），由调用方统一渲染 404。一旦「不可见」
+    // 变成别的返回值（抛错 / 空对象），详情页就成了「该 slug 是否存在」的探测器。
     await expect(
-      callerFor(db, PLAIN).content.bySlug({ type: 'news', slug: 'hello' }),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      getPublishedContentBySlug('news', 'hello'),
+    ).resolves.toBeNull();
+    await expect(
+      getPublishedContentBySlug('news', 'no-such-slug'),
+    ).resolves.toBeNull();
   });
 
   it('定向内容对命中角色可读', async () => {
@@ -283,13 +319,99 @@ describe('content router 门户读取', () => {
       status: 'published',
       visibleRoles: ['editor'],
     });
+    asViewer(EDITOR);
 
-    const row = await callerFor(db, EDITOR).content.bySlug({
-      type: 'news',
-      slug: 'hello',
+    const row = await getPublishedContentBySlug('news', 'hello');
+
+    expect(row?.slug).toBe('hello');
+  });
+});
+
+describe('内容封面文件回收', () => {
+  let db: TestDb;
+  let close: () => Promise<void>;
+
+  const OLD_COVER = '/uploads/content/old.png';
+
+  beforeAll(async () => {
+    ({ db, close } = await createTestDb());
+    serverDbHolder.db = db;
+  });
+  afterAll(async () => {
+    await close();
+  });
+  beforeEach(async () => {
+    await resetDb(db);
+    await seedUsers(db);
+    await seedContentTypes(db);
+    vi.mocked(deleteFile).mockClear();
+  });
+
+  /** 建一条带封面的内容，返回它的 id */
+  async function createWithCover(): Promise<number> {
+    const created = await callerFor(db, ADMIN).content.create({
+      ...draft,
+      coverImage: OLD_COVER,
+    });
+    if (!created) throw new Error('测试前置条件失败：内容未创建');
+    return created.id;
+  }
+
+  it('换封面时删掉旧文件', async () => {
+    const id = await createWithCover();
+
+    await callerFor(db, ADMIN).content.update({
+      ...draft,
+      id,
+      coverImage: '/uploads/content/new.png',
     });
 
-    expect(row.slug).toBe('hello');
+    expect(deleteFile).toHaveBeenCalledWith(OLD_COVER);
+  });
+
+  it('清空封面时把封面置空并删掉旧文件', async () => {
+    const id = await createWithCover();
+
+    await callerFor(db, ADMIN).content.update({
+      ...draft,
+      id,
+      coverImage: null,
+    });
+
+    // 库里必须真的被置空。入参若退回 undefined，drizzle 会把该列整个跳过，
+    // 表现就是「点掉封面、保存成功、刷新后封面还在」。
+    const [row] = await db.select().from(content);
+    expect(row?.coverImage).toBeNull();
+    expect(deleteFile).toHaveBeenCalledWith(OLD_COVER);
+  });
+
+  it('入参不带 coverImage 时不碰旧文件', async () => {
+    const id = await createWithCover();
+
+    // 这一路最危险：drizzle 遇到 undefined 会跳过该列，封面其实原封不动。
+    // 若用入参而不是「库里的新旧值」来判断是否清理，这里就会把仍在使用的文件删掉。
+    await callerFor(db, ADMIN).content.update({ ...draft, id });
+
+    const [row] = await db.select().from(content);
+    expect(row?.coverImage).toBe(OLD_COVER);
+    expect(deleteFile).not.toHaveBeenCalled();
+  });
+
+  it('删除内容时一并删掉封面', async () => {
+    const id = await createWithCover();
+
+    await callerFor(db, ADMIN).content.delete({ id });
+
+    expect(deleteFile).toHaveBeenCalledWith(OLD_COVER);
+  });
+
+  it('无封面的内容被删除时不会去删文件', async () => {
+    const created = await callerFor(db, ADMIN).content.create(draft);
+    if (!created) throw new Error('测试前置条件失败：内容未创建');
+
+    await callerFor(db, ADMIN).content.delete({ id: created.id });
+
+    expect(deleteFile).not.toHaveBeenCalled();
   });
 });
 

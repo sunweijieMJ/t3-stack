@@ -104,10 +104,13 @@ export default function AdminUsersView({ authMethod }: AdminUsersViewProps) {
             确定要删除 <Text strong>{row.email ?? row.name}</Text>{' '}
             吗？此操作不可恢复。
           </p>
+          {/* 只能说「是管理员」，不能说「在 ADMIN_EMAILS 白名单里」：isAdmin 来自
+              listUsers 的 getUserRole(r) === 'admin'（见 routers/admin.ts），那是
+              **合并白名单之后**的有效角色，数据库里 role='admin' 但不在白名单的账号
+              同样为 true。写死白名单会让管理员以为要去改环境变量。 */}
           {row.isAdmin && (
             <p style={{ color: '#cf1322' }}>
-              该账号的邮箱在 ADMIN_EMAILS
-              白名单中，删除后这个人将无法再登录后台。
+              该账号是管理员，删除后这个人将无法再登录后台。
             </p>
           )}
           <p style={{ color: '#8c8c8c', fontSize: 12 }}>

@@ -54,6 +54,15 @@ async function uploadToLocal(
  * 从 URL 中解析出存储 key（uploads/<module>/<file>）。
  * 同时兼容 OSS 的绝对 URL 与 local 的相对路径 /uploads/...。
  * 不属于本系统上传的外链返回 null（避免误删第三方资源）。
+ *
+ * 必须拒绝含 `..` 的路径段：返回值会被拼进 join(cwd, 'public', key) 再 unlink，
+ * 而 join 会把 `..` 解析掉。相对路径这一支尤其危险 —— `new URL()` 对绝对 URL 会
+ * 自动归一化掉 `..`，但对 `/uploads/../../.env` 会直接抛错并回退到原串，于是
+ * `startsWith('uploads/')` 照过。缺了这道校验，「保存门户配置」就等于「删应用
+ * 服务器上任意可达文件」（OSS 分支同理，删的是桶内任意 key）。
+ *
+ * 分隔符按 `/` 与 `\` 一起切：Windows 下反斜杠同样是路径分隔符，只查 `/` 会漏掉
+ * `uploads/..\..\.env` 这种写法。
  */
 function parseStorageKey(url: string): string | null {
   if (!url) return null;
@@ -64,7 +73,9 @@ function parseStorageKey(url: string): string | null {
     pathname = url;
   }
   const stripped = pathname.replace(/^\//, '');
-  return stripped.startsWith('uploads/') ? stripped : null;
+  if (!stripped.startsWith('uploads/')) return null;
+  if (stripped.split(/[\\/]/).some((segment) => segment === '..')) return null;
+  return stripped;
 }
 
 /**

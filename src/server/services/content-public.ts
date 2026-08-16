@@ -1,5 +1,6 @@
 import 'server-only';
 import { and, count, desc, eq } from 'drizzle-orm';
+import { cache } from 'react';
 import {
   type ContentType,
   findContentType,
@@ -64,22 +65,30 @@ export async function listPublishedContent(params: {
   return { rows, total: totalResult[0]?.total ?? 0, page, pageSize };
 }
 
-/** 门户详情。不可见与不存在一律返回 null，由调用方渲染 404，避免变成探测接口 */
-export async function getPublishedContentBySlug(type: string, slug: string) {
-  const viewer = await getViewer();
-  const [row] = await db
-    .select()
-    .from(content)
-    .where(
-      and(
-        eq(content.type, type),
-        eq(content.slug, slug),
-        visibleContentWhere(viewer),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
-}
+/**
+ * 门户详情。不可见与不存在一律返回 null，由调用方渲染 404，避免变成探测接口。
+ *
+ * 裹 React.cache 做请求级去重：详情页的 generateMetadata 与页面组件会各调一次
+ * （同一组 type/slug），不去重就是每个请求两趟同样的查询。Next 的自动去重只覆盖
+ * 被它扩展过的 fetch()，直连 Drizzle 的查询不在其列 —— 同 getFrontendConfig 的处理。
+ */
+export const getPublishedContentBySlug = cache(
+  async (type: string, slug: string) => {
+    const viewer = await getViewer();
+    const [row] = await db
+      .select()
+      .from(content)
+      .where(
+        and(
+          eq(content.type, type),
+          eq(content.slug, slug),
+          visibleContentWhere(viewer),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  },
+);
 
 /** 后台配置的内容类型清单 */
 export async function getContentTypes(): Promise<ContentType[]> {

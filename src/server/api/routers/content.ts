@@ -1,22 +1,18 @@
 import { TRPCError } from '@trpc/server';
 import { and, count, desc, eq, ilike, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import { after } from 'next/server';
 import { z } from 'zod';
 import { sanitizeContentHtml } from '@/lib/content-html';
 import { resolveContentTypes } from '@/lib/content-types';
 import { CONTENT_STATUSES } from '@/lib/content-visibility';
 import { ROLES } from '@/lib/rbac';
-import {
-  createTRPCRouter,
-  permissionProcedure,
-  publicProcedure,
-} from '@/server/api/trpc';
+import { createTRPCRouter, permissionProcedure } from '@/server/api/trpc';
 import { isUniqueViolation } from '@/server/db/pg-error';
 import type * as schema from '@/server/db/schema';
 import { content, contentCategory, systemConfig } from '@/server/db/schema';
-import { getUserRole } from '@/server/services/admin-check';
 import { FRONTEND_CONFIG_KEY } from '@/server/services/config';
-import { visibleContentWhere } from '@/server/services/content-query';
+import { deleteFile } from '@/server/services/storage';
 
 const manageProcedure = permissionProcedure('content.manage');
 
@@ -67,7 +63,10 @@ const contentInput = z.object({
   summary: z.string().max(1000).optional(),
   // 富文本正文不设长度上限校验，而是在净化后落库；净化会剔除绝大部分注入体积
   body: z.string().optional(),
-  coverImage: z.string().max(2048).optional(),
+  // nullable 不能省：前端清除封面时传 null，只写 optional 的话 null 会被 zod 拒绝，
+  // 而改传 undefined 又会被 drizzle 的 buildUpdateSet 整列剔除（值为 undefined 的列
+  // 不会进 SET 子句），结果是封面一旦上传就再也删不掉。与下方 categoryId 保持一致。
+  coverImage: z.string().max(2048).nullable().optional(),
   categoryId: z.number().int().positive().nullable().optional(),
   status: z.enum(CONTENT_STATUSES).optional(),
   publishedAt: z.iso.datetime().nullable().optional(),
@@ -193,7 +192,9 @@ export const contentRouter = createTRPCRouter({
       // 改成一个有效类型。换成**别的**类型时仍然必须已登记。
       // 后台表单会把这种未登记的原类型作为额外选项标注出来，两边语义一致。
       const [existing] = await ctx.db
-        .select({ type: content.type })
+        // 顺带取出旧封面：这一次查询本来就要发（上面的类型校验需要），
+        // 多选一列不额外增加开销，却是「换封面后回收旧文件」唯一的信息来源。
+        .select({ type: content.type, coverImage: content.coverImage })
         .from(content)
         .where(eq(content.id, id))
         .limit(1);
@@ -204,18 +205,17 @@ export const contentRouter = createTRPCRouter({
         await assertRegisteredType(ctx.db, rest.type);
       }
 
+      // try 只裹住 DB 调用本身。此前 NOT_FOUND 也抛在里面，catch 才不得不先写一句
+      // `err instanceof TRPCError` 把它放行；收窄范围后那句判断就不需要了，
+      // 也避免下面的封面清理万一抛错被误报成「更新内容失败」。
+      let updated: (typeof content.$inferSelect)[];
       try {
-        const updated = await ctx.db
+        updated = await ctx.db
           .update(content)
           .set(toDbValues(rest))
           .where(eq(content.id, id))
           .returning();
-        if (updated.length === 0) {
-          throw new TRPCError({ code: 'NOT_FOUND', message: '内容不存在' });
-        }
-        return updated[0];
       } catch (err) {
-        if (err instanceof TRPCError) throw err;
         if (isUniqueViolation(err)) throw DUPLICATE_SLUG;
         console.error('[content.update] 更新失败:', err);
         throw new TRPCError({
@@ -223,6 +223,23 @@ export const contentRouter = createTRPCRouter({
           message: '更新内容失败',
         });
       }
+
+      if (updated.length === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '内容不存在' });
+      }
+
+      // 换封面 / 清空封面后，把不再被引用的旧文件删掉，否则每换一次就在存储里
+      // 永久留一份孤儿。
+      //
+      // 比的是「库里的旧值」与「库里的新值」，而不是入参 rest.coverImage ——
+      // 入参为 undefined 时 drizzle 会把该列整个跳过（值不变），拿入参判断会把
+      // 「这次没动封面」误当成「封面被清空」，把仍在使用的文件删掉。
+      const newCover = updated[0]?.coverImage ?? null;
+      if (existing.coverImage && existing.coverImage !== newCover) {
+        after(deleteFile(existing.coverImage));
+      }
+
+      return updated[0];
     }),
 
   delete: manageProcedure
@@ -231,10 +248,22 @@ export const contentRouter = createTRPCRouter({
       const deleted = await ctx.db
         .delete(content)
         .where(eq(content.id, input.id))
-        .returning({ id: content.id });
+        // 顺带取回封面 URL：内容行没了就再也查不到它引用过哪个文件，
+        // 不在这一次 returning 里拿，孤儿文件就永远无法回收。
+        .returning({ id: content.id, coverImage: content.coverImage });
       if (deleted.length === 0) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '内容不存在' });
       }
+
+      // 封面文件跟着内容一起删。不 await：清理失败只会留下一个孤儿文件
+      // （等同于改动前的行为），不该让删除内容这个主流程失败；deleteFile 内部
+      // 已经自己吞掉异常并记日志。
+      //
+      // 用 after() 而非裸 void：Serverless 下响应返回后实例即冻结，未保活的删除
+      // 请求会被直接丢弃 —— 与 routers/page.ts 的 purgeOrphanAssets 同一处理。
+      const removedCover = deleted[0]?.coverImage;
+      if (removedCover) after(deleteFile(removedCover));
+
       return { success: true };
     }),
 
@@ -293,82 +322,16 @@ export const contentRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  // ---- 门户读取 ----
+  // 门户读取（listPublished / bySlug）曾经也挂在这里，已移除。
   //
-  // 用 publicProcedure：门户内容对匿名访客开放，可见性由 visibleContentWhere
-  // 按当前登录角色（未登录为 null）在 SQL 层收敛，不依赖调用方传角色 ——
-  // 角色若由入参传入，任何人都能带上 editor 来读定向内容。
-
-  listPublished: publicProcedure
-    .input(
-      z.object({
-        type: z.string().min(1).max(32),
-        page: z.number().min(1).default(1),
-        pageSize: z.number().min(1).max(50).default(10),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      const viewer = {
-        role: ctx.session?.user ? getUserRole(ctx.session.user) : null,
-        now: new Date(),
-      };
-      const where = and(
-        eq(content.type, input.type),
-        visibleContentWhere(viewer),
-      );
-
-      const [rows, totalResult] = await Promise.all([
-        ctx.db
-          .select({
-            id: content.id,
-            type: content.type,
-            slug: content.slug,
-            title: content.title,
-            summary: content.summary,
-            coverImage: content.coverImage,
-            categoryId: content.categoryId,
-            pinned: content.pinned,
-            publishedAt: content.publishedAt,
-          })
-          .from(content)
-          .where(where)
-          // 置顶优先，其次按发布时间倒序；publishedAt 可为空，用 id 兜底保证
-          // 排序稳定，否则同一页刷新两次顺序可能不同。
-          .orderBy(
-            desc(content.pinned),
-            desc(content.publishedAt),
-            desc(content.id),
-          )
-          .limit(input.pageSize)
-          .offset((input.page - 1) * input.pageSize),
-        ctx.db.select({ total: count() }).from(content).where(where),
-      ]);
-
-      return { rows, total: totalResult[0]?.total ?? 0 };
-    }),
-
-  bySlug: publicProcedure
-    .input(z.object({ type: z.string().min(1).max(32), slug: slugSchema }))
-    .query(async ({ ctx, input }) => {
-      const viewer = {
-        role: ctx.session?.user ? getUserRole(ctx.session.user) : null,
-        now: new Date(),
-      };
-      const [row] = await ctx.db
-        .select()
-        .from(content)
-        .where(
-          and(
-            eq(content.type, input.type),
-            eq(content.slug, input.slug),
-            visibleContentWhere(viewer),
-          ),
-        )
-        .limit(1);
-      // 不可见与不存在返回同一个 NOT_FOUND：区分开会变成一个探测接口，
-      // 让未授权者能枚举出哪些 slug 存在但对自己不可见。
-      if (!row)
-        throw new TRPCError({ code: 'NOT_FOUND', message: '内容不存在' });
-      return row;
-    }),
+  // 它们与 server/services/content-public 的 listPublishedContent /
+  // getPublishedContentBySlug 是同一套查询的两份实现，而门户页面是 RSC，直接调
+  // service，从来没有走过这两个 procedure —— 运行时零调用点，只有测试在用。
+  //
+  // 危害不是多几十行代码，而是**测试测的是没人跑的那一份**：两份实现已经开始
+  // 漂移（tRPC 版的 select 比 service 版多了 type / categoryId），而任何针对
+  // service 版的改动都不会让测试变红。现在测试直接打 service，删掉这层重复。
+  //
+  // 将来若确实需要从客户端组件读门户内容，再在这里加回一个 publicProcedure 薄封装
+  // 转调 content-public 即可，不要重新抄一份查询。
 });

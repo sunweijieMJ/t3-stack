@@ -165,6 +165,11 @@ export default function AdminContentView({
     message.success(`已${verb}`);
     closeDrawer();
     void utils.content.list.invalidate();
+    // byId 也必须失效：openEdit 走的是 utils.content.byId.fetch()，而 query-client
+    // 设了 staleTime=30s —— 缓存未过期时 fetch 直接返回旧值，不发请求。不失效的话，
+    // 保存后 30 秒内再点「编辑」，抽屉里是保存**前**的内容，用户再点保存就把刚才的
+    // 修改覆盖回去了，全程没有任何报错。
+    void utils.content.byId.invalidate();
   };
   const onFailed = (err: { message: string }) =>
     message.error(err.message || '操作失败');
@@ -194,7 +199,16 @@ export default function AdminContentView({
   // 必须按 id 重新取完整记录：列表接口不再返回 body（正文太大，见 router 里的
   // 说明），直接拿列表行填表单会让正文变成空字符串，一保存就把内容清空。
   const openEdit = async (row: ContentRow) => {
-    const full = await utils.content.byId.fetch({ id: row.id });
+    // 必须自己兜错：调用方是 `void openEdit(row)`，抛出去就是一条无人处理的
+    // unhandled rejection —— 内容已被他人删除或网络抖动时，抽屉不打开、没有任何
+    // 提示，用户只会觉得「编辑按钮点了没反应」。
+    let full: ContentDetail;
+    try {
+      full = await utils.content.byId.fetch({ id: row.id });
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '打开失败，请重试');
+      return;
+    }
     setEditing(full);
     form.setFieldsValue({
       type: full.type,
@@ -229,7 +243,9 @@ export default function AdminContentView({
           visibleRoles: (vals.visibleRoles ?? []) as (typeof ROLES)[number][],
           pinned: vals.pinned ?? false,
           categoryId: vals.categoryId ?? null,
-          coverImage: vals.coverImage ?? undefined,
+          // 必须传 null 而不是 undefined：undefined 会被 drizzle 从 UPDATE 的 SET
+          // 子句里整列剔除，用户点掉封面后保存，库里的旧封面纹丝不动。
+          coverImage: vals.coverImage ?? null,
         };
         return editing
           ? updateMutation.mutate({ ...payload, id: editing.id })

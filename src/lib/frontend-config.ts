@@ -170,14 +170,33 @@ const externalUrlSchema = z
     message: '必须是 http:// 或 https:// 开头的完整链接',
   });
 
+// 站内路径里带 `..` 段的一律拒绝。
+//
+// isSafeInternalPath 只保证「归一化后不逃逸出本 origin」，而 `/uploads/../../.env`
+// 归一化成 `/.env` 仍是站内路径，它照样放行。问题在于这个值最终会被
+// server/services/storage 的 deleteFile 当成存储 key 去删文件，`..` 在那里会被
+// path.join 解析掉。只对站内路径分支检查：绝对 URL 走 `new URL()` 时 `..` 已被
+// 规范化掉，不会带进 key。
+//
+// storage.parseStorageKey 里有同样一道校验，两处都保留 —— 这里给的是「保存时
+// 立刻报错」的反馈，那里是「即使脏数据已经躺在库里也不会被执行」的兜底。
+const hasPathTraversal = (v: string) =>
+  v.split(/[\\/]/).some((segment) => segment === '..');
+
 // inputType='image' / 'file'：由 /api/upload 回填。local 存储回相对路径
 // /uploads/...，OSS 存储回绝对 URL，两种都要放行（空串表示未上传）。
 const assetUrlSchema = z
   .string()
   .max(MAX_URL_LEN)
-  .refine((v) => v === '' || isSafeInternalPath(v) || isSafeHttpUrl(v), {
-    message: '必须是站内路径（/ 开头）或 http(s) 链接',
-  });
+  .refine(
+    (v) =>
+      v === '' ||
+      (isSafeInternalPath(v) && !hasPathTraversal(v)) ||
+      isSafeHttpUrl(v),
+    {
+      message: '必须是站内路径（/ 开头，不含 ..）或 http(s) 链接',
+    },
+  );
 
 // 将 JsonSchema 节点转换为对应的 zod 校验器。
 function nodeToZod(node: JsonSchema): z.ZodType {
