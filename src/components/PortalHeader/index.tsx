@@ -21,7 +21,18 @@ export function PortalHeader({ siteName, logoImage }: PortalHeaderProps) {
   useEffect(() => {
     const sections = () =>
       Array.from(document.querySelectorAll<HTMLElement>('[data-portal-theme]'));
-    if (sections().length === 0) return;
+
+    // 没有任何标记区块时必须回落到 light，不能直接 return。
+    // 直接 return 会让 tone 停在初始的 'dark'（.header 是 color:#fff），而
+    // data-portal-theme 目前只有首页在用 —— /content/*、/no-access 都是浅色底，
+    // 结果是顶栏站点名白字压白底，肉眼完全看不见（配了 logoImage 才勉强可见，
+    // 因为那时渲染的是图片，文字只在 alt 里）。
+    // 兜底放在这里而不是去各个页面补 data-portal-theme：后者等于要求每个新增的
+    // 门户页都记得加一个属性，漏了就又是一次「无人报错的不可见」。深色首屏是首页的特例。
+    if (sections().length === 0) {
+      setTone('light');
+      return;
+    }
 
     let io: IntersectionObserver | null = null;
 
