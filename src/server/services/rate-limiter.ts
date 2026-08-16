@@ -168,17 +168,31 @@ async function getBackend(): Promise<LimiterBackend> {
 }
 
 export class RateLimiter {
+  private readonly name: string;
   private readonly maxRequests: number;
   private readonly windowMs: number;
 
-  constructor(maxRequests: number, windowMs: number) {
+  constructor(name: string, maxRequests: number, windowMs: number) {
+    this.name = name;
     this.maxRequests = maxRequests;
     this.windowMs = windowMs;
   }
 
+  /**
+   * name 必须进 key。后端（内存 Map / Redis）是模块级单例，四个 limiter 共用同一份
+   * 存储，而调用方传进来的 key 又都是同一个 ip —— 不加 name 前缀的话它们计的是同一个数：
+   * 每个 /api/* 请求先被 globalIpLimiter（60 次）压一条时间戳，同一 IP 发到第 10 个请求时，
+   * 桶里已有 ≥10 条，紧接着的 otpSendLimiter（10 次）立刻判超限，返回「验证码发送过于频繁」。
+   * TRUST_PROXY_HEADERS 默认 false 时 getClientIp 恒为 'unknown'，全站用户还共用这一个桶 ——
+   * 现场表现是「整站每分钟十几个 API 请求之后，谁都收不到验证码」，而提示语指向完全错误的方向。
+   */
   async check(key: string): Promise<RateLimitResult> {
     const backend = await getBackend();
-    return backend.check(key, this.maxRequests, this.windowMs);
+    return backend.check(
+      `${this.name}:${key}`,
+      this.maxRequests,
+      this.windowMs,
+    );
   }
 }
 
@@ -205,20 +219,32 @@ export function parseRateLimit(
 }
 
 function rl(
+  name: string,
   envValue: string | undefined,
   defaultMax: number,
   defaultWindowMs: number,
 ) {
   return new RateLimiter(
+    name,
     ...parseRateLimit(envValue, defaultMax, defaultWindowMs),
   );
 }
 
-export const uploadLimiter = rl(env.RATE_LIMIT_UPLOAD, 5, 60_000);
-export const globalIpLimiter = rl(env.RATE_LIMIT_GLOBAL_IP, 60, 60_000);
+export const uploadLimiter = rl('upload', env.RATE_LIMIT_UPLOAD, 5, 60_000);
+export const globalIpLimiter = rl(
+  'global',
+  env.RATE_LIMIT_GLOBAL_IP,
+  60,
+  60_000,
+);
 // 登录/验证端点限流：仅覆盖登录与验证尝试，验证本身另有 better-auth allowedAttempts 兜底，
 // 阈值可宽松，避免共享 NAT 出口 IP 时误伤正常用户。
-export const authIpLimiter = rl(env.RATE_LIMIT_AUTH_IP, 20, 60_000);
+export const authIpLimiter = rl('auth', env.RATE_LIMIT_AUTH_IP, 20, 60_000);
 // 验证码发送限流：仅覆盖 send-verification-otp 这类有成本（邮件）的端点，与验证端点分离，
 // 防止「发送 1 次 + 验证 1 次」就占满登录额度。
-export const otpSendLimiter = rl(env.RATE_LIMIT_OTP_SEND, 10, 60_000);
+export const otpSendLimiter = rl(
+  'otp-send',
+  env.RATE_LIMIT_OTP_SEND,
+  10,
+  60_000,
+);
