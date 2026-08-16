@@ -2,6 +2,7 @@ import dayjs from 'dayjs';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
+  clampPage,
   getContentType,
   listPublishedContent,
 } from '@/server/services/content-public';
@@ -22,7 +23,9 @@ export default async function ContentListPage({
 }: PageProps) {
   const { type } = await params;
   const { page: rawPage } = await searchParams;
-  const page = Math.max(1, Number(rawPage) || 1);
+  // 用与 listPublishedContent 同一套收敛：这里的 page 还要参与分页器渲染，
+  // 沿用旧的 `Number(rawPage) || 1` 会让 ?page=Infinity 渲染出「Infinity / 3」。
+  const page = clampPage(rawPage);
 
   // 未在后台登记的类型一律 404：不校验的话 /content/任意字符串 都会渲染出
   // 一个空列表页并把原始 slug 当标题，既是 SEO 垃圾页，也让类型名打错这种

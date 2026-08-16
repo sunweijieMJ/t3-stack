@@ -29,6 +29,26 @@ export async function getViewer(): Promise<Viewer> {
 }
 
 /**
+ * 页码上界。offset 由 (page-1)*pageSize 算出，不封顶的话一个大页码就是一次
+ * 深分页全表扫；内容表也不可能有这么多页，超出即视为无效输入。
+ */
+const MAX_PAGE = 10_000;
+const MAX_PAGE_SIZE = 100;
+
+/** 收敛成 [1, MAX_PAGE] 内的整数，非法输入一律回落到第 1 页 */
+export function clampPage(value: unknown): number {
+  const n = Math.trunc(Number(value));
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(n, MAX_PAGE);
+}
+
+function clampPageSize(value: unknown): number {
+  const n = Math.trunc(Number(value));
+  if (!Number.isFinite(n) || n < 1) return 10;
+  return Math.min(n, MAX_PAGE_SIZE);
+}
+
+/**
  * 门户列表：置顶优先，其次发布时间倒序，id 兜底保证翻页顺序稳定。
  *
  * 第二档必须用 COALESCE(published_at, created_at) 而不能直接 `desc(publishedAt)`：
@@ -45,8 +65,12 @@ export async function listPublishedContent(params: {
   page?: number;
   pageSize?: number;
 }) {
-  const page = params.page ?? 1;
-  const pageSize = params.pageSize ?? 10;
+  // 页码在这里收敛，而不是只在调用页收敛：offset 直接由它算出，一个 Infinity /
+  // 1e21 / 小数传进来，postgres.js 会把它按 String(x) 发给 PG 去转 bigint 并直接
+  // 报语法错误 —— 门户列表页因此渲染 500，而不是回落到第 1 页。
+  // 放在 service 里，将来任何新调用方（RSS、搜索、API）都自动受保护。
+  const page = clampPage(params.page);
+  const pageSize = clampPageSize(params.pageSize);
   const viewer = await getViewer();
   const where = and(eq(content.type, params.type), visibleContentWhere(viewer));
 
