@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, count, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq, sql } from 'drizzle-orm';
 import { cache } from 'react';
 import {
   type ContentType,
@@ -28,7 +28,18 @@ export async function getViewer(): Promise<Viewer> {
   };
 }
 
-/** 门户列表：置顶优先，其次发布时间倒序，id 兜底保证翻页顺序稳定 */
+/**
+ * 门户列表：置顶优先，其次发布时间倒序，id 兜底保证翻页顺序稳定。
+ *
+ * 第二档必须用 COALESCE(published_at, created_at) 而不能直接 `desc(publishedAt)`：
+ * 后台的「发布时间」是可选项，不填就落 NULL，而 PostgreSQL 的 DESC 默认 NULLS FIRST ——
+ * 这类内容会**永久排在所有填了时间的内容之前**，连置顶项都压不住它（同属 pinned=false 档），
+ * 列表页还因为取不到日期而不显示时间，现场看不出任何异常。
+ *
+ * 回落到 created_at 而不是简单加 NULLS LAST：未填发布时间的内容在 visibleContentWhere 里
+ * 是「立即生效」的（见 lib/content-visibility），把它沉到列表最底同样不对 ——
+ * 它应该按「什么时候有的这篇」排，这正是 created_at 的语义。
+ */
 export async function listPublishedContent(params: {
   type: string;
   page?: number;
@@ -54,7 +65,7 @@ export async function listPublishedContent(params: {
       .where(where)
       .orderBy(
         desc(content.pinned),
-        desc(content.publishedAt),
+        sql`coalesce(${content.publishedAt}, ${content.createdAt}) desc`,
         desc(content.id),
       )
       .limit(pageSize)
