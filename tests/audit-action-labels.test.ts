@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { ACTION_LABELS } from '@/server/api/audit-action-labels';
+import {
+  ACTION_LABELS,
+  NON_TRPC_AUDIT_ACTIONS,
+} from '@/server/api/audit-action-labels';
 import { appRouter } from '@/server/api/root';
 
 /**
@@ -47,11 +50,25 @@ describe('ACTION_LABELS', () => {
   });
 
   it('没有指向已不存在 mutation 的残留条目', () => {
-    const known = new Set(mutationPaths);
+    // 合法来源有两类：路由自省出的 mutation，以及显式登记的非 tRPC 动作
+    // （route handler / 定时任务，自省看不到它们）。两者之外的都是残留。
+    const known = new Set([
+      ...mutationPaths,
+      ...Object.keys(NON_TRPC_AUDIT_ACTIONS),
+    ]);
     const stale = Object.keys(ACTION_LABELS).filter((p) => !known.has(p));
     expect(
       stale,
       `以下条目在 ACTION_LABELS 中，但路由里已没有对应 mutation（重命名或删除后遗留）：\n  ${stale.join('\n  ')}`,
     ).toEqual([]);
+  });
+
+  it('非 tRPC 动作也都有中文名', () => {
+    // NON_TRPC_AUDIT_ACTIONS 已经被展开进 ACTION_LABELS，这条断言防的是
+    // 将来有人改成手工同步两张表之后忘了其中一张。
+    const missing = Object.keys(NON_TRPC_AUDIT_ACTIONS).filter(
+      (a) => !(a in ACTION_LABELS),
+    );
+    expect(missing).toEqual([]);
   });
 });

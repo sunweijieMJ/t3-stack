@@ -8,15 +8,14 @@
  */
 
 import { initTRPC, TRPCError } from '@trpc/server';
-import { after } from 'next/server';
 import superjson from 'superjson';
 import { ZodError } from 'zod';
 
 import type { Permission } from '@/lib/rbac';
 import { auth } from '@/server/better-auth';
 import { db } from '@/server/db';
-import { adminAuditLog } from '@/server/db/schema';
 import { userCan } from '@/server/services/admin-check';
+import { writeAuditLog } from '@/server/services/audit';
 import { getClientIp } from '@/server/services/get-client-ip';
 
 /**
@@ -195,22 +194,9 @@ const auditMiddleware = t.middleware(
     const ip = rawIp === 'unknown' ? null : rawIp;
     const ua = ctx.headers.get('user-agent') ?? null;
 
-    const writeLog = (values: typeof adminAuditLog.$inferInsert) => {
-      // 必须走 after() 而不是裸 void：Serverless（Vercel）在响应写回后会立即冻结
-      // 甚至回收实例，未被保活的 Promise 会被直接丢弃 —— 表现为审计日志随机缺条，
-      // 而审计恰恰是最不能丢的数据，且这种丢失不会有任何报错。
-      // after() 让 Next 把回调保活到响应之后再 flush；standalone 长进程下行为不变。
-      after(
-        db
-          .insert(adminAuditLog)
-          .values(values)
-          .catch((err) => console.error('[AuditLog] 写入失败:', err)),
-      );
-    };
-
     try {
       const result = await next();
-      writeLog({
+      writeAuditLog({
         userId: sessionUser.id,
         userEmail: sessionUser.email,
         action: path,
@@ -221,7 +207,7 @@ const auditMiddleware = t.middleware(
       });
       return result;
     } catch (error) {
-      writeLog({
+      writeAuditLog({
         userId: sessionUser.id,
         userEmail: sessionUser.email,
         action: path,

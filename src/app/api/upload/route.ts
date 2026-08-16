@@ -2,10 +2,17 @@ import { nanoid } from 'nanoid';
 import { NextResponse } from 'next/server';
 
 import { MODULE_PERMISSIONS, resolveUploadModule } from '@/lib/upload-modules';
+import type { NonTrpcAuditAction } from '@/server/api/audit-action-labels';
 import { auth } from '@/server/better-auth';
 import { userCan } from '@/server/services/admin-check';
+import { writeAuditLog } from '@/server/services/audit';
+import { getClientIp } from '@/server/services/get-client-ip';
 import { uploadLimiter } from '@/server/services/rate-limiter';
 import { uploadFile } from '@/server/services/storage';
+
+// 用具名类型而非裸字面量：写错 action 会编译报错，而不是等到有人翻审计日志
+// 才发现「操作」列显示的是原始字符串。
+const UPLOAD_ACTION: NonTrpcAuditAction = 'upload.file';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
 const MAX_PDF_SIZE = 20 * 1024 * 1024; // 20MB
@@ -129,6 +136,28 @@ export async function POST(request: Request) {
       detected.mime,
       downloadName,
     );
+
+    // 上传是一次产出公开可访问 URL 的写操作，必须留痕。
+    // 此前审计只挂在 tRPC 中间件上，这条路径一个字都不记 —— 管理员按审计日志
+    // 排查「谁传了这个文件」会得到「没有人传过」的结论。
+    // 记 url 而不记文件内容：定位靠 URL 就够了，内容本身在存储里。
+    const rawIp = getClientIp(request.headers);
+    writeAuditLog({
+      userId: session.user.id,
+      userEmail: session.user.email,
+      action: UPLOAD_ACTION,
+      input: {
+        module,
+        accept,
+        originalName: file.name,
+        size: file.size,
+        mime: detected.mime,
+        url: fileUrl,
+      },
+      result: 'success',
+      ipAddress: rawIp === 'unknown' ? null : rawIp,
+      userAgent: request.headers.get('user-agent') ?? null,
+    });
 
     return NextResponse.json({ url: fileUrl, name: file.name });
   } catch (err) {
