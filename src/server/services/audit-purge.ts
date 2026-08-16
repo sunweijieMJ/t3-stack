@@ -40,8 +40,13 @@ async function readConfigKeys(keys: string[]) {
   return new Map(rows.map((r) => [r.key, r.value]));
 }
 
-async function upsertConfig(key: string, value: unknown) {
-  await db
+/** executor 可传事务对象，让多个 key 的写入落在同一事务里 */
+async function upsertConfig(
+  key: string,
+  value: unknown,
+  executor: Pick<typeof db, 'insert'> = db,
+) {
+  await executor
     .insert(systemConfig)
     .values({ key, value: value as never })
     .onConflictDoUpdate({
@@ -73,10 +78,13 @@ export async function setAuditPurgeConfig(input: {
   enabled: boolean;
   retentionDays: number;
 }) {
-  await Promise.all([
-    upsertConfig(KEY_ENABLED, input.enabled),
-    upsertConfig(KEY_RETENTION, input.retentionDays),
-  ]);
+  // 两个 key 必须一起成功或一起失败。原先是 Promise.all 并发裸写：中途失败会留下
+  // 「开关改了、保留天数没改」这种半截状态，而 UI 是一个表单一次提交，管理员看到
+  // 保存失败后不会想到只有一半生效 —— 下一次自动清理就按他没打算要的天数删数据。
+  await db.transaction(async (tx) => {
+    await upsertConfig(KEY_ENABLED, input.enabled, tx);
+    await upsertConfig(KEY_RETENTION, input.retentionDays, tx);
+  });
 }
 
 /**
