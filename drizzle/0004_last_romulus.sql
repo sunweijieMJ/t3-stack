@@ -1,0 +1,1 @@
+CREATE INDEX "content_portal_list_idx" ON "organova_content" USING btree ("type","status","pinned" DESC NULLS FIRST,coalesce("published_at", "created_at") desc,"id" DESC NULLS FIRST);
