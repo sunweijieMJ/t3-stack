@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   authIpLimiter,
   globalIpLimiter,
+  globalUserLimiter,
   otpSendLimiter,
   parseRateLimit,
   RateLimiter,
@@ -38,6 +39,21 @@ describe('RateLimiter 的计数桶隔离', () => {
     expect((await globalIpLimiter.check(key)).allowed).toBe(true);
     expect((await authIpLimiter.check(key)).allowed).toBe(true);
     expect((await uploadLimiter.check(key)).allowed).toBe(true);
+    expect((await globalUserLimiter.check(key)).allowed).toBe(true);
+  });
+
+  it('按用户与按 IP 的全局桶互不占用', async () => {
+    // 两者 name 只差一个后缀（'global' / 'global-user'），是最容易被写成同一个
+    // 命名空间的一对。真共用的话，一个 NAT 出口后面某个人把 IP 桶打满，
+    // 会连带把所有已登录用户一起顶掉 —— 正是这次改造要消除的现象。
+    const key = freshKey();
+
+    for (let i = 0; i < 60; i++) {
+      expect((await globalIpLimiter.check(key)).allowed).toBe(true);
+    }
+    expect((await globalIpLimiter.check(key)).allowed).toBe(false);
+
+    expect((await globalUserLimiter.check(key)).allowed).toBe(true);
   });
 
   it('反向也成立：全局限流的计数不会占用验证码发送的额度', async () => {

@@ -1,12 +1,14 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { permissionForAdminPath } from '@/lib/admin-menu';
+import { shouldKeyByUser } from '@/lib/rate-limit-scope';
 import { auth } from '@/server/better-auth';
 import { userCan } from '@/server/services/admin-check';
 import { getClientIp } from '@/server/services/get-client-ip';
 import {
   authIpLimiter,
   globalIpLimiter,
+  globalUserLimiter,
   otpSendLimiter,
 } from '@/server/services/rate-limiter';
 
@@ -31,6 +33,29 @@ function rateLimitResponse(retryAfterMs: number, message: string) {
   );
 }
 
+/**
+ * 取当前请求的登录用户 id；未登录、或解析失败时返回 null（调用方回落到按 IP 限流）。
+ *
+ * 必须真的验签，不能图省事直接拿 cookie 值当 key —— 那样谁都能随便编一串 cookie
+ * 换一个全新的计数桶，限流形同虚设。
+ *
+ * 开销可接受：session 开了 cookieCache（见 better-auth/config.ts），命中期内
+ * getSession 只做一次签名校验，不查库。这确实与 createTRPCContext 里那次
+ * getSession 重复了一遍（React cache 跨不过 proxy → route handler 的边界），
+ * 代价是一次 HMAC，换来的是限流不再被 NAT 出口 IP 绑死。
+ *
+ * 出错一律吞掉回落到 IP：限流不该成为整站不可用的单点。
+ */
+async function resolveUserId(request: NextRequest): Promise<string | null> {
+  try {
+    const session = await auth.api.getSession({ headers: request.headers });
+    return session?.user?.id ?? null;
+  } catch (err) {
+    console.error('[proxy] 限流身份解析失败，回落到按 IP 计数:', err);
+    return null;
+  }
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -44,9 +69,23 @@ export async function proxy(request: NextRequest) {
 
   const ip = getClientIp(request);
 
-  // API 全局 IP 限流
+  // API 全局限流：已登录按 userId，未登录按 IP。
+  //
+  // 为什么不能一律按 IP：整个办公室通常共用一个公网出口 IP，而
+  // TRUST_PROXY_HEADERS=true 时 getClientIp 拿到的正是那个出口地址。于是
+  // RATE_LIMIT_GLOBAL_IP（默认 60 次/分钟）变成**全公司共享**的配额 —— 后台又是
+  // 重交互场景（多个 query + refetchOnWindowFocus），两三个人同时用就开始随机吃
+  // 429，而每个人自己的操作频率都完全正常。这种故障几乎不可能从现场反推到限流。
+  //
+  // /api/auth/* 例外，仍然按 IP：那是登录前的表面，没有可信身份，也正是暴力破解
+  // 的目标（见 lib/rate-limit-scope）。
   if (pathname.startsWith('/api/')) {
-    const globalCheck = await globalIpLimiter.check(ip);
+    const userId = shouldKeyByUser(pathname)
+      ? await resolveUserId(request)
+      : null;
+    const globalCheck = userId
+      ? await globalUserLimiter.check(userId)
+      : await globalIpLimiter.check(ip);
     if (!globalCheck.allowed) {
       return rateLimitResponse(
         globalCheck.retryAfterMs,

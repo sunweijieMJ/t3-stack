@@ -237,6 +237,18 @@ export const globalIpLimiter = rl(
   60,
   60_000,
 );
+/**
+ * 已登录请求的全局限流，按 userId 计数。
+ *
+ * name 必须与 globalIpLimiter 不同（'global-user' vs 'global'），否则两者会共用
+ * 同一个计数桶 —— 见 RateLimiter.check 上那段说明，桶隔离完全靠 name 前缀。
+ */
+export const globalUserLimiter = rl(
+  'global-user',
+  env.RATE_LIMIT_GLOBAL_USER,
+  600,
+  60_000,
+);
 // 登录/验证端点限流：仅覆盖登录与验证尝试，验证本身另有 better-auth allowedAttempts 兜底，
 // 阈值可宽松，避免共享 NAT 出口 IP 时误伤正常用户。
 export const authIpLimiter = rl('auth', env.RATE_LIMIT_AUTH_IP, 20, 60_000);
