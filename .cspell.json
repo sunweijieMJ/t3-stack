@@ -22,6 +22,8 @@
     "OOM",
     "SSG",
     "SQLSTATE",
+    "gstatic",
+    "pathkey",
     "trgm",
     "Millis",
     "regclass",
