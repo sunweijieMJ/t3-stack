@@ -323,10 +323,25 @@ pipeline {
         cleanup {
             // 只清本次构建 tag 的镜像，不做 system prune —— 那会把其他项目/其他
             // 分支的构建缓存一起删掉，共享 agent 上会显著拖慢所有人的下一次构建。
+            //
+            // 两组 tag 都要清：REGISTRY 模式建的是 $APP_IMAGE（带仓库前缀），
+            // OFFLINE 模式下镜像是 package.sh 自己建的、tag 形如
+            // organova-app:<hash>，与前者完全不同名。只清前一组的话，OFFLINE
+            // 模式每跑一次就在 agent 上永久留下两个几百 MB 的镜像 ——
+            // 共享 agent 的磁盘会被慢慢吃光，而且看不出是谁留下的。
+            //
+            // package.sh 用的是裸 `git rev-parse --short`（core.abbrev=auto），
+            // 与上面 GIT_TAG 的 --short=7 可能不同长度，所以这里按它的口径
+            // 重新取一次，不能复用 GIT_TAG。
             sh '''
                 set +e
                 [ -n "${APP_IMAGE:-}" ]   && docker rmi "$APP_IMAGE"   >/dev/null 2>&1
                 [ -n "${NGINX_IMAGE:-}" ] && docker rmi "$NGINX_IMAGE" >/dev/null 2>&1
+                LOCAL_TAG=$(git rev-parse --short HEAD 2>/dev/null)
+                if [ -n "$LOCAL_TAG" ]; then
+                    docker rmi "organova-app:$LOCAL_TAG"   >/dev/null 2>&1
+                    docker rmi "organova-nginx:$LOCAL_TAG" >/dev/null 2>&1
+                fi
                 exit 0
             '''
         }

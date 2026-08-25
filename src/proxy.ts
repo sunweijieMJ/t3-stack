@@ -77,8 +77,11 @@ export async function proxy(request: NextRequest) {
   // 重交互场景（多个 query + refetchOnWindowFocus），两三个人同时用就开始随机吃
   // 429，而每个人自己的操作频率都完全正常。这种故障几乎不可能从现场反推到限流。
   //
-  // /api/auth/* 例外，仍然按 IP：那是登录前的表面，没有可信身份，也正是暴力破解
-  // 的目标（见 lib/rate-limit-scope）。
+  // 划分规则在 lib/rate-limit-scope：默认按用户，`/api/auth/*` 回到按 IP
+  // （登录前的表面，没有可信身份，也正是暴力破解的目标），其中 get-session 与
+  // sign-out 又是例外中的例外 —— 它们只有已登录才有意义，而 get-session 挂在
+  // admin-shell 上、包着每个后台页面，是后台最高频的已登录请求，留在 IP 桶里
+  // 这次改动就只解决了一半。
   if (pathname.startsWith('/api/')) {
     const userId = shouldKeyByUser(pathname)
       ? await resolveUserId(request)
