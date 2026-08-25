@@ -5,6 +5,14 @@ services:
     # 容器会瞬崩，unless-stopped 会无限重启把磁盘日志和镜像层吃满。重试 5 次就停，
     # 留时间排查；正常运行时崩溃同样会自愈，只是不会无限拉。
     restart: on-failure:5
+    # json-file 驱动默认没有上限。上面那条 on-failure:5 的注释担心的正是「崩溃循环
+    # 把磁盘写满」，但只限制了重启次数、没限制日志 —— 而带病运行（每个请求都报错）
+    # 同样能把盘写满，那种情况重启次数一次都不会涨。两者都要堵。
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     expose:
       - "3000"
     env_file:
@@ -24,6 +32,11 @@ services:
   organova-nginx:
     image: ${NGINX_IMAGE:?NGINX_IMAGE is required}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # 仅 HTTP。需要 HTTPS 时建议由宿主机反向代理（外层 nginx / 云负载均衡）终止 SSL。
     ports:
       - "${HOST_PORT:-80}:80"

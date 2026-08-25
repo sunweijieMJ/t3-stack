@@ -14,3 +14,13 @@ tests
 .vscode
 .idea
 .DS_Store
+
+# 本地跑过 STORAGE_PROVIDER=local 之后攒下的上传文件。它们是运行时数据，
+# 生产由 uploads_data 卷提供，打进镜像只会平白撑大镜像层，还可能把本地测试
+# 上传的内容带到生产。注意保留 public 目录本身（Dockerfile 会 mkdir 兜底）。
+public/uploads
+
+# 离线部署包与中间产物，构建上下文里用不到
+deploy_package
+*.tar
+*.tar.gz

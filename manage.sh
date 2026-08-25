@@ -60,6 +60,15 @@ check_docker() {
         log_error "Docker Compose is not available."
         exit 1
     fi
+    # curl 是硬依赖，必须在这里就拦下来。health_check 用 `curl ... || true` 取状态码，
+    # 缺了 curl 时 status 恒为空串 → 判定为不健康 → update / pull-deploy 会把一个
+    # 其实完全正常的新版本自动回滚掉，而日志里只剩「健康检查失败」一行，
+    # 排查方向会被完全带偏（会去查应用而不是查这台机器缺个命令）。
+    if ! command -v curl >/dev/null 2>&1; then
+        log_error "curl is not installed — 健康检查依赖它，缺失会导致正常版本被误判并自动回滚。"
+        log_error "请先安装：yum install -y curl  或  apt-get install -y curl"
+        exit 1
+    fi
 }
 
 # ── 首次部署初始化 ──────────────────────────────────────────
