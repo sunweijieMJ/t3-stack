@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { and, count, desc, eq, ilike, type SQL } from 'drizzle-orm';
+import { and, count, desc, eq, ilike, isNull, type SQL } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { after } from 'next/server';
 import { z } from 'zod';
@@ -92,6 +92,61 @@ const DUPLICATE_SLUG = new TRPCError({
   message: '同类型下已存在相同 slug 的内容',
 });
 
+/**
+ * 分类树的最大层数。既是环路检测的兜底，也是「别把分类做成无限深」的显式表态：
+ * 门户导航展示不了十几层，深树只会让后台的父级下拉变成一堆看不懂的缩进。
+ */
+const MAX_CATEGORY_DEPTH = 8;
+
+/**
+ * 校验把 `id` 挂到 `parentId` 下不会形成环。
+ *
+ * 必须做。contentCategory.parentId 自引用且没有任何数据库约束能拦住环 ——
+ * 只要有人把 A 的父级设成 B、再把 B 的父级设成 A，任何自顶向下遍历这棵树的代码
+ * （后台的父级下拉、将来的门户分类导航）都会无限递归直到爆栈。而这条数据一旦落库，
+ * 每次打开分类管理页都会挂，连「把它改回去」的界面本身都进不去 —— 只能手工改库。
+ *
+ * 判据是从目标父级往上走：路上撞见 id 自己，说明 id 是它的祖先，这条边会成环。
+ */
+async function assertNoCategoryCycle(
+  db: PostgresJsDatabase<typeof schema>,
+  id: number,
+  parentId: number | null,
+): Promise<void> {
+  if (parentId === null) return;
+  if (parentId === id) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: '不能把分类的父级设为它自己',
+    });
+  }
+
+  let cursor: number | null = parentId;
+  for (let depth = 0; depth < MAX_CATEGORY_DEPTH; depth++) {
+    if (cursor === null) return;
+    if (cursor === id) {
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: '该分类是目标父级的上级，这样设置会形成循环',
+      });
+    }
+    const [row] = await db
+      .select({ parentId: contentCategory.parentId })
+      .from(contentCategory)
+      .where(eq(contentCategory.id, cursor))
+      .limit(1);
+    if (!row) return; // 父级已被删除，交给外键去处理
+    cursor = row.parentId;
+  }
+
+  // 走满上限还没到根：要么已经有环（历史脏数据），要么层数超标。两种都拒绝，
+  // 拒绝方向是安全的 —— 不会让一条新的坏边进来。
+  throw new TRPCError({
+    code: 'BAD_REQUEST',
+    message: `分类层级不能超过 ${MAX_CATEGORY_DEPTH} 层`,
+  });
+}
+
 export const contentRouter = createTRPCRouter({
   // ---- 后台管理 ----
 
@@ -103,12 +158,24 @@ export const contentRouter = createTRPCRouter({
         type: z.string().max(32).optional(),
         status: z.enum(CONTENT_STATUSES).optional(),
         keyword: z.string().max(128).optional(),
+        // 0 表示「未分类」（categoryId IS NULL）。用一个哨兵值而不是额外加一个
+        // boolean 参数：下拉框的取值天然是单一维度，两个参数会出现
+        // 「categoryId=3 且 uncategorized=true」这种表达不出语义的组合。
+        // min(0) 而非 positive()：0 就是那个哨兵值，必须能通过校验。
+        categoryId: z.number().int().min(0).optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
       const conditions: SQL[] = [];
       if (input.type) conditions.push(eq(content.type, input.type));
       if (input.status) conditions.push(eq(content.status, input.status));
+      if (input.categoryId !== undefined) {
+        conditions.push(
+          input.categoryId === 0
+            ? isNull(content.categoryId)
+            : eq(content.categoryId, input.categoryId),
+        );
+      }
       if (input.keyword) {
         // 转义 LIKE 通配符，避免用户输入的 % / _ 把过滤变成全表匹配
         const escaped = input.keyword.replace(/[\\%_]/g, (m) => `\\${m}`);
@@ -134,8 +201,14 @@ export const contentRouter = createTRPCRouter({
             visibleRoles: content.visibleRoles,
             pinned: content.pinned,
             updatedAt: content.updatedAt,
+            // 分类名随列表一起取回，避免前端拿 categoryId 再去 listCategories 里
+            // 自己映射 —— 那样分类被删掉之后（外键 SET NULL）两边会短暂不一致，
+            // 表格显示的是一个已经不存在的分类名。leftJoin 保证「没分类」与
+            // 「分类已删」都落到 null，语义一致。
+            categoryName: contentCategory.name,
           })
           .from(content)
+          .leftJoin(contentCategory, eq(content.categoryId, contentCategory.id))
           .where(where)
           .orderBy(desc(content.updatedAt))
           .limit(input.pageSize)
@@ -305,6 +378,51 @@ export const contentRouter = createTRPCRouter({
           message: '创建分类失败',
         });
       }
+    }),
+
+  updateCategory: manageProcedure
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        name: z.string().min(1).max(128),
+        slug: slugSchema.max(128),
+        parentId: z.number().int().positive().nullable().optional(),
+        sortOrder: z.number().int().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...rest } = input;
+      // parentId 显式传 undefined 时表示「不动父级」，此时不需要环路校验；
+      // 传 null（挂到顶层）也不可能成环。
+      if (rest.parentId !== undefined) {
+        await assertNoCategoryCycle(ctx.db, id, rest.parentId ?? null);
+      }
+
+      let updated: (typeof contentCategory.$inferSelect)[];
+      try {
+        updated = await ctx.db
+          .update(contentCategory)
+          .set(rest)
+          .where(eq(contentCategory.id, id))
+          .returning();
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: '已存在相同 slug 的分类',
+          });
+        }
+        console.error('[content.updateCategory] 更新失败:', err);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: '更新分类失败',
+        });
+      }
+
+      if (updated.length === 0) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '分类不存在' });
+      }
+      return updated[0];
     }),
 
   deleteCategory: manageProcedure

@@ -9,6 +9,7 @@ import {
   Drawer,
   Form,
   Input,
+  InputNumber,
   Select,
   Space,
   Switch,
@@ -113,6 +114,259 @@ function CoverField({
   );
 }
 
+type CategoryRow = RouterOutputs['content']['listCategories'][number];
+
+/** 分类下拉里显示的层级缩进。分类树最多 8 层，见 router 的 MAX_CATEGORY_DEPTH */
+function categoryDepth(
+  row: CategoryRow,
+  byId: Map<number, CategoryRow>,
+): number {
+  let depth = 0;
+  let parentId = row.parentId;
+  // 上界防御：库里若已存在环（历史脏数据早于环路校验落地），
+  // 这里必须能停下来，否则整个后台分类页会直接卡死浏览器标签页。
+  while (parentId != null && depth < 8) {
+    parentId = byId.get(parentId)?.parentId ?? null;
+    depth++;
+  }
+  return depth;
+}
+
+interface CategoryFormValues {
+  name: string;
+  slug: string;
+  parentId?: number | null;
+  sortOrder?: number;
+}
+
+/**
+ * 分类管理。
+ *
+ * 此前分类只有后端三个 procedure 和内容表单里一个下拉框，却没有任何创建入口 ——
+ * 下拉框永远是空的，categoryId 存进去也没有任何地方读。这个抽屉把这条链路补完。
+ */
+function CategoryManager({
+  open,
+  onClose,
+  categories,
+  loading,
+}: {
+  open: boolean;
+  onClose: () => void;
+  categories: CategoryRow[];
+  loading: boolean;
+}) {
+  const { message, modal } = App.useApp();
+  const utils = api.useUtils();
+  const [form] = Form.useForm<CategoryFormValues>();
+  const [editingId, setEditingId] = useState<number | null>(null);
+
+  const byId = new Map(categories.map((c) => [c.id, c]));
+
+  const refresh = () => {
+    void utils.content.listCategories.invalidate();
+    // 内容列表带着 categoryName（服务端 leftJoin 取的），改了分类名之后
+    // 不失效的话表格里还是旧名字。
+    void utils.content.list.invalidate();
+  };
+
+  const resetForm = () => {
+    setEditingId(null);
+    form.resetFields();
+  };
+
+  const onError = (err: { message: string }) =>
+    message.error(err.message || '操作失败');
+
+  const createMutation = api.content.createCategory.useMutation({
+    onSuccess: () => {
+      message.success('已创建分类');
+      resetForm();
+      refresh();
+    },
+    onError,
+  });
+  const updateMutation = api.content.updateCategory.useMutation({
+    onSuccess: () => {
+      message.success('已保存分类');
+      resetForm();
+      refresh();
+    },
+    onError,
+  });
+  const deleteMutation = api.content.deleteCategory.useMutation({
+    onSuccess: () => {
+      message.success('已删除分类');
+      resetForm();
+      refresh();
+    },
+    onError,
+  });
+
+  const startEdit = (row: CategoryRow) => {
+    setEditingId(row.id);
+    form.setFieldsValue({
+      name: row.name,
+      slug: row.slug,
+      parentId: row.parentId,
+      sortOrder: row.sortOrder,
+    });
+  };
+
+  const submit = () => {
+    form
+      .validateFields()
+      .then((vals) => {
+        const payload = {
+          name: vals.name.trim(),
+          slug: vals.slug.trim(),
+          parentId: vals.parentId ?? null,
+          sortOrder: vals.sortOrder ?? 0,
+        };
+        return editingId === null
+          ? createMutation.mutate(payload)
+          : updateMutation.mutate({ ...payload, id: editingId });
+      })
+      .catch(() => undefined);
+  };
+
+  const confirmDelete = (row: CategoryRow) => {
+    modal.confirm({
+      title: '删除分类',
+      content: (
+        <div>
+          <p>确定要删除「{row.name}」吗？</p>
+          {/* 说清楚不会级联删内容，否则没人敢点这个按钮 —— 外键是 SET NULL，
+              见 db/content-schema.ts */}
+          <p style={{ color: '#8c8c8c', fontSize: 12 }}>
+            该分类下的内容不会被删除，会变成「未分类」；子分类会挂回顶层。
+          </p>
+        </div>
+      ),
+      okText: '确认删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () => deleteMutation.mutate({ id: row.id }),
+    });
+  };
+
+  // 父级候选里必须排掉自己：选中自己会被服务端拒（assertNoCategoryCycle），
+  // 让它出现在下拉里只是让人白点一次。更深的环由服务端负责，前端不重复实现。
+  const parentOptions = categories
+    .filter((c) => c.id !== editingId)
+    .map((c) => ({
+      value: c.id,
+      label: `${'　'.repeat(categoryDepth(c, byId))}${c.name}`,
+    }));
+
+  const columns: ColumnsType<CategoryRow> = [
+    {
+      title: '名称',
+      dataIndex: 'name',
+      render: (name: string, row) => (
+        <span style={{ paddingLeft: categoryDepth(row, byId) * 16 }}>
+          {name}
+        </span>
+      ),
+    },
+    { title: 'Slug', dataIndex: 'slug', width: 150 },
+    { title: '排序', dataIndex: 'sortOrder', width: 70 },
+    {
+      title: '操作',
+      width: 110,
+      render: (_, row) => (
+        <Space size="small">
+          <Button onClick={() => startEdit(row)} size="small" type="link">
+            编辑
+          </Button>
+          <Button
+            danger
+            onClick={() => confirmDelete(row)}
+            size="small"
+            type="link"
+          >
+            删除
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <Drawer
+      destroyOnHidden
+      onClose={() => {
+        resetForm();
+        onClose();
+      }}
+      open={open}
+      title="分类管理"
+      width={640}
+    >
+      <Form form={form} layout="vertical">
+        <Space size="middle" style={{ display: 'flex' }}>
+          <Form.Item
+            label="名称"
+            name="name"
+            rules={[{ required: true, message: '请填写名称' }]}
+            style={{ flex: 1 }}
+          >
+            <Input placeholder="行业动态" />
+          </Form.Item>
+          <Form.Item
+            label="Slug"
+            name="slug"
+            rules={[
+              { required: true, message: '请填写 slug' },
+              {
+                pattern: /^[a-z0-9-]+$/,
+                message: '只能包含小写字母、数字和连字符',
+              },
+            ]}
+            style={{ flex: 1 }}
+            tooltip="会出现在门户的 ?category= 参数里，全站唯一"
+          >
+            <Input placeholder="industry-news" />
+          </Form.Item>
+        </Space>
+        <Space size="middle" style={{ display: 'flex' }}>
+          <Form.Item label="父级分类" name="parentId" style={{ flex: 1 }}>
+            <Select allowClear options={parentOptions} placeholder="顶层分类" />
+          </Form.Item>
+          <Form.Item
+            label="排序"
+            name="sortOrder"
+            style={{ flex: 1 }}
+            tooltip="数字越小越靠前，相同则按创建顺序"
+          >
+            <InputNumber placeholder="0" style={{ width: '100%' }} />
+          </Form.Item>
+        </Space>
+        <Space>
+          <Button
+            loading={createMutation.isPending || updateMutation.isPending}
+            onClick={submit}
+            type="primary"
+          >
+            {editingId === null ? '新建分类' : '保存修改'}
+          </Button>
+          {editingId !== null && <Button onClick={resetForm}>取消编辑</Button>}
+        </Space>
+      </Form>
+
+      <Table
+        columns={columns}
+        dataSource={categories}
+        loading={loading}
+        pagination={false}
+        rowKey="id"
+        size="small"
+        style={{ marginTop: 24 }}
+      />
+    </Drawer>
+  );
+}
+
 interface AdminContentViewProps {
   /** 「门户设置 → 内容类型」里登记的清单，由 page.tsx 在服务端读取后注入 */
   contentTypes: ContentType[];
@@ -129,6 +383,13 @@ export default function AdminContentView({
   const [keyword, setKeyword] = useState('');
   const [editing, setEditing] = useState<ContentDetail | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  // undefined=不筛选，0=未分类（与 router 的哨兵值对齐），正数=具体分类
+  const [categoryFilter, setCategoryFilter] = useState<number | undefined>();
+  const [typeFilter, setTypeFilter] = useState<string | undefined>();
+  const [statusFilter, setStatusFilter] = useState<
+    (typeof CONTENT_STATUSES)[number] | undefined
+  >();
 
   const typeOptions = contentTypes.map((t) => ({
     value: t.slug,
@@ -147,12 +408,20 @@ export default function AdminContentView({
       : typeOptions;
 
   const pageSize = 20;
-  const { data: categories } = api.content.listCategories.useQuery();
+  const { data: categories, isLoading: categoriesLoading } =
+    api.content.listCategories.useQuery();
+  const categoryList = categories ?? [];
 
   const { data, isLoading } = api.content.list.useQuery({
     page,
     pageSize,
     ...(keyword ? { keyword } : {}),
+    // 不能写成 `categoryId: categoryFilter`：undefined 会被 superjson 保留，
+    // 而 zod 的 .optional() 认得 undefined，行为是对的 —— 但展开写更明确，
+    // 也和上面 keyword 的处理保持一致。
+    ...(categoryFilter === undefined ? {} : { categoryId: categoryFilter }),
+    ...(typeFilter ? { type: typeFilter } : {}),
+    ...(statusFilter ? { status: statusFilter } : {}),
   });
 
   const closeDrawer = () => {
@@ -280,6 +549,15 @@ export default function AdminContentView({
     { title: '类型', dataIndex: 'type', width: 110 },
     { title: 'Slug', dataIndex: 'slug', width: 160 },
     {
+      title: '分类',
+      dataIndex: 'categoryName',
+      width: 120,
+      // categoryName 由服务端 leftJoin 取回，「没设分类」与「分类已被删除」
+      // 都是 null，展示成同一个「未分类」是正确的 —— 两者对内容本身没有区别。
+      render: (name: string | null) =>
+        name ? <Tag>{name}</Tag> : <span style={{ color: '#bfbfbf' }}>—</span>,
+    },
+    {
       title: '状态',
       width: 100,
       // 展示的是「此刻的实际状态」而非库里的 status：定时发布未到点、
@@ -356,7 +634,7 @@ export default function AdminContentView({
         />
       )}
 
-      <Space style={{ marginBottom: 16 }}>
+      <Space style={{ marginBottom: 16 }} wrap>
         <Input.Search
           allowClear
           onSearch={(v) => {
@@ -366,6 +644,52 @@ export default function AdminContentView({
           placeholder="搜索标题"
           style={{ width: 240 }}
         />
+        {/* 换任何筛选条件都要回第 1 页：停在第 3 页切到一个只有 1 页的结果集会
+            得到空列表，而分页器还显示「共 N 条」，看起来像数据丢了。 */}
+        <Select<string | undefined>
+          allowClear
+          onChange={(v) => {
+            setTypeFilter(v);
+            setPage(1);
+          }}
+          options={typeOptions}
+          placeholder="全部类型"
+          style={{ width: 170 }}
+          value={typeFilter}
+        />
+        <Select<(typeof CONTENT_STATUSES)[number] | undefined>
+          allowClear
+          onChange={(v) => {
+            setStatusFilter(v);
+            setPage(1);
+          }}
+          options={CONTENT_STATUSES.map((s) => ({
+            value: s,
+            label: STATUS_LABELS[s],
+          }))}
+          placeholder="全部状态"
+          style={{ width: 130 }}
+          // 这里筛的是**库里存的 status**，不是表格「状态」列显示的实际状态。
+          // 两者会不一致：定时未到点 / 已过期的内容 status 仍然是 published，
+          // 选「发布」会把它们一并带出来。不说清楚的话，用户会以为筛选坏了。
+          title="按存储状态筛选。定时未生效、已下架的内容其存储状态仍是「发布」"
+          value={statusFilter}
+        />
+        <Select<number | undefined>
+          allowClear
+          onChange={(v) => {
+            setCategoryFilter(v);
+            setPage(1);
+          }}
+          options={[
+            { value: 0, label: '未分类' },
+            ...categoryList.map((c) => ({ value: c.id, label: c.name })),
+          ]}
+          placeholder="全部分类"
+          style={{ width: 160 }}
+          value={categoryFilter}
+        />
+        <Button onClick={() => setCategoryOpen(true)}>分类管理</Button>
         <Button
           disabled={contentTypes.length === 0}
           icon={<PlusOutlined />}
@@ -378,6 +702,13 @@ export default function AdminContentView({
           新建内容
         </Button>
       </Space>
+
+      <CategoryManager
+        categories={categoryList}
+        loading={categoriesLoading}
+        onClose={() => setCategoryOpen(false)}
+        open={categoryOpen}
+      />
 
       <Table
         columns={columns}
@@ -457,7 +788,7 @@ export default function AdminContentView({
             <Form.Item label="分类" name="categoryId" style={{ flex: 1 }}>
               <Select
                 allowClear
-                options={(categories ?? []).map((c) => ({
+                options={categoryList.map((c) => ({
                   value: c.id,
                   label: c.name,
                 }))}

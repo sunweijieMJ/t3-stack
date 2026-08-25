@@ -524,3 +524,162 @@ describe('content router 类型登记校验', () => {
     expect(updated?.type).toBe('blog');
   });
 });
+
+describe('content router 分类', () => {
+  let db: TestDb;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, close } = await createTestDb());
+    serverDbHolder.db = db;
+  });
+  afterAll(async () => {
+    await close();
+  });
+  beforeEach(async () => {
+    await resetDb(db);
+    await seedUsers(db);
+    await seedContentTypes(db);
+  });
+
+  /** 建一棵 a → b → c 的三层分类树，返回各自的 id */
+  async function seedTree() {
+    const caller = callerFor(db, ADMIN).content;
+    const a = await caller.createCategory({ name: 'A', slug: 'a' });
+    if (!a) throw new Error('测试前置条件失败：分类 A 未创建');
+    const b = await caller.createCategory({
+      name: 'B',
+      slug: 'b',
+      parentId: a.id,
+    });
+    if (!b) throw new Error('测试前置条件失败：分类 B 未创建');
+    const c = await caller.createCategory({
+      name: 'C',
+      slug: 'c',
+      parentId: b.id,
+    });
+    if (!c) throw new Error('测试前置条件失败：分类 C 未创建');
+    return { a, b, c };
+  }
+
+  it('updateCategory 能改名与改 slug', async () => {
+    const { a } = await seedTree();
+    const updated = await callerFor(db, ADMIN).content.updateCategory({
+      id: a.id,
+      name: '行业动态',
+      slug: 'industry',
+    });
+    expect(updated?.name).toBe('行业动态');
+    expect(updated?.slug).toBe('industry');
+  });
+
+  it('slug 重复时报 CONFLICT 而不是 500', async () => {
+    const { a, b } = await seedTree();
+    await expect(
+      callerFor(db, ADMIN).content.updateCategory({
+        id: b.id,
+        name: 'B',
+        slug: a.slug,
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('不存在的分类报 NOT_FOUND', async () => {
+    await expect(
+      callerFor(db, ADMIN).content.updateCategory({
+        id: 99999,
+        name: 'X',
+        slug: 'x',
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  // 下面三条是这次改动里最有风险的部分：parentId 自引用，数据库层没有任何约束
+  // 能拦住环。一旦落库，任何自顶向下遍历这棵树的代码都会无限递归，而且连
+  // 「把它改回去」的后台页面本身都打不开，只能手工改库。
+  it('不能把父级设为自己', async () => {
+    const { a } = await seedTree();
+    await expect(
+      callerFor(db, ADMIN).content.updateCategory({
+        id: a.id,
+        name: 'A',
+        slug: 'a',
+        parentId: a.id,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('不能把父级设为自己的直接子级（两节点环）', async () => {
+    const { a, b } = await seedTree();
+    await expect(
+      callerFor(db, ADMIN).content.updateCategory({
+        id: a.id,
+        name: 'A',
+        slug: 'a',
+        parentId: b.id,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('不能把父级设为更深的后代（跨层环）', async () => {
+    // a → b → c，此时把 a 挂到 c 底下。只查一层父级的实现会漏掉这种情况，
+    // 所以必须显式覆盖。
+    const { a, c } = await seedTree();
+    await expect(
+      callerFor(db, ADMIN).content.updateCategory({
+        id: a.id,
+        name: 'A',
+        slug: 'a',
+        parentId: c.id,
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('合法的重挂父级不受影响', async () => {
+    const { a, c } = await seedTree();
+    // 把 c 从 b 底下挪到 a 底下 —— 方向朝上，不成环，应当放行
+    const updated = await callerFor(db, ADMIN).content.updateCategory({
+      id: c.id,
+      name: 'C',
+      slug: 'c',
+      parentId: a.id,
+    });
+    expect(updated?.parentId).toBe(a.id);
+  });
+
+  it('删除分类不会删掉内容，只把它变成未分类', async () => {
+    const { a } = await seedTree();
+    const created = await callerFor(db, ADMIN).content.create({
+      ...draft,
+      categoryId: a.id,
+    });
+    if (!created) throw new Error('测试前置条件失败：内容未创建');
+
+    await callerFor(db, ADMIN).content.deleteCategory({ id: a.id });
+
+    // 外键是 ON DELETE SET NULL —— 内容必须还在，只是失去了分类。
+    // 若哪天有人把它改成 CASCADE，删一个分类会静默带走一批内容，这条会先红。
+    const after = await callerFor(db, ADMIN).content.byId({ id: created.id });
+    expect(after.id).toBe(created.id);
+    expect(after.categoryId).toBeNull();
+  });
+
+  it('后台列表能按分类筛选，0 表示未分类', async () => {
+    const { a } = await seedTree();
+    const caller = callerFor(db, ADMIN).content;
+    await caller.create({ ...draft, slug: 'with-cat', categoryId: a.id });
+    await caller.create({ ...draft, slug: 'no-cat' });
+
+    const inCategory = await caller.list({ categoryId: a.id });
+    expect(inCategory.rows.map((r) => r.slug)).toEqual(['with-cat']);
+    // 分类名随列表一起回传，前端不必自己映射
+    expect(inCategory.rows[0]?.categoryName).toBe('A');
+
+    const uncategorized = await caller.list({ categoryId: 0 });
+    expect(uncategorized.rows.map((r) => r.slug)).toEqual(['no-cat']);
+    expect(uncategorized.rows[0]?.categoryName).toBeNull();
+
+    // 不传则不过滤
+    expect((await caller.list({})).total).toBe(2);
+  });
+});
