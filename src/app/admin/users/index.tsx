@@ -10,6 +10,7 @@ import {
   Select,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -151,23 +152,45 @@ export default function AdminUsersView({ authMethod }: AdminUsersViewProps) {
       dataIndex: 'role',
       width: 150,
       render: (role: string, row) => {
+        // 白名单账号根本不渲染下拉框：它的角色由 ADMIN_EMAILS 决定，改库不生效
+        // （见 lib/rbac 的 resolveRole），服务端会直接 FORBIDDEN。渲染一个能点、
+        // 点了必然报错的控件是纯粹的误导 —— 换成一个说明为什么的标签。
+        //
+        // 不用「禁用的 Select」表达：disabled 元素在多数浏览器里不触发鼠标事件，
+        // 挂上去的 title / Tooltip 都弹不出来，用户只会看到一个灰掉的框而拿不到
+        // 任何原因，正是本项目反复要避免的那种「看得见、不能用、不知道为什么」。
+        if (row.isEnvAdmin) {
+          return (
+            <Tooltip title="该账号的邮箱在 ADMIN_EMAILS 白名单中，角色由环境变量决定。要改角色需先把它移出白名单并重启（或重新部署）。">
+              <Tag color="gold" style={{ cursor: 'help' }}>
+                管理员（白名单）
+              </Tag>
+            </Tooltip>
+          );
+        }
+
         // 自己的角色不给改：服务端同样会拒（会失去 user.manage 后再也改不回来）。
-        // 白名单账号的角色由 ADMIN_EMAILS 决定，改库不生效，这里一并禁用并说明，
-        // 免得管理员改完以为生效了。
         const isSelf = row.id === session?.user.id;
-        const disabled = isSelf || setRoleMutation.isPending;
-        return (
+        const select = (
           <Select<(typeof ROLES)[number]>
-            disabled={disabled}
+            disabled={isSelf || setRoleMutation.isPending}
             onChange={(next) =>
               setRoleMutation.mutate({ userId: row.id, role: next })
             }
             options={ROLES.map((r) => ({ value: r, label: ROLE_LABELS[r] }))}
             size="small"
             style={{ width: 120 }}
-            title={isSelf ? '不能修改自己的角色' : undefined}
             value={role as (typeof ROLES)[number]}
           />
+        );
+        // Tooltip 必须套在一个非 disabled 的元素上才收得到鼠标事件，
+        // 所以这里包一层 span 而不是直接给 Select 加 title。
+        return isSelf ? (
+          <Tooltip title="不能修改自己的角色">
+            <span>{select}</span>
+          </Tooltip>
+        ) : (
+          select
         );
       },
     },

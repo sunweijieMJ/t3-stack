@@ -60,7 +60,17 @@ export const env = createEnv({
 
     // 限流（格式：「次数/窗口毫秒」）
     RATE_LIMIT_UPLOAD: z.string().default('5/60000'),
+    // 未登录请求按来源 IP 计数。这个桶在「整个办公室共用一个公网出口 IP」的场景下
+    // 是全公司共享的，所以它只该覆盖登录前的表面，登录后走下面的 GLOBAL_USER。
     RATE_LIMIT_GLOBAL_IP: z.string().default('60/60000'),
+    // 已登录请求按 userId 计数，与 IP 无关。
+    //
+    // 存在的理由：后台是重交互场景（列表、审计页、配置页各自若干 query，还会
+    // refetchOnWindowFocus），单人每分钟打几十个 /api/trpc 请求是正常的。若这些请求
+    // 继续落进按 IP 的桶里，同一个 NAT 出口后面的所有人会共享一份配额 —— 现场表现是
+    // 「后台用着用着开始随机 429」，而每个人自己的操作频率都完全正常，极难定位。
+    // 阈值给得比 IP 桶宽，因为它已经锚定到具体的人，滥用可追责也可单独封停。
+    RATE_LIMIT_GLOBAL_USER: z.string().default('600/60000'),
     // 登录/验证端点 IP 限流：仅防暴力，验证另有 allowedAttempts 兜底，阈值放宽避免误伤共享出口 IP
     RATE_LIMIT_AUTH_IP: z.string().default('20/60000'),
     // 验证码发送端点（有短信/邮件成本）单独限流，与验证端点分离，防止发送 1 次 + 验证 1 次就占满登录额度
@@ -123,6 +133,7 @@ export const env = createEnv({
     SMTP_PASS: stripQuotes(process.env.SMTP_PASS),
     RATE_LIMIT_UPLOAD: stripQuotes(process.env.RATE_LIMIT_UPLOAD),
     RATE_LIMIT_GLOBAL_IP: stripQuotes(process.env.RATE_LIMIT_GLOBAL_IP),
+    RATE_LIMIT_GLOBAL_USER: stripQuotes(process.env.RATE_LIMIT_GLOBAL_USER),
     RATE_LIMIT_AUTH_IP: stripQuotes(process.env.RATE_LIMIT_AUTH_IP),
     RATE_LIMIT_OTP_SEND: stripQuotes(process.env.RATE_LIMIT_OTP_SEND),
     RATE_LIMIT_OTP_VERIFY: stripQuotes(process.env.RATE_LIMIT_OTP_VERIFY),

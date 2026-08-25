@@ -149,9 +149,23 @@ export const adminRouter = createTRPCRouter({
     // 有效角色，因此列表里显示的就是该用户实际拥有的权限，而不是库里那个
     // 可能被白名单覆盖的原始值。
     // isAdmin 保留：前端用它提示「你正在删除一个管理员账号」。
+    //
+    // isEnvAdmin 是另一回事，不能用 isAdmin 顶替：它表示「角色由 ADMIN_EMAILS
+    // 决定，改库不生效」。库里 role='admin' 但不在白名单的账号 isAdmin=true 而
+    // isEnvAdmin=false —— 那种账号是**可以**被降级的。前端靠这一位决定要不要禁用
+    // 角色下拉；缺了它就只能让人点下去再吃一个 FORBIDDEN（见下方 setUserRole）。
+    //
+    // 只下发这一个布尔值，不下发白名单本身：调用方已经具备 user.manage（能看到
+    // 全部账号和角色），知道某个账号「归环境变量管」不构成额外泄露，而把
+    // ADMIN_EMAILS 整份发给客户端会。
     return rows.map((r) => {
       const role = getUserRole(r);
-      return { ...r, role, isAdmin: role === 'admin' };
+      return {
+        ...r,
+        role,
+        isAdmin: role === 'admin',
+        isEnvAdmin: isAdminEmail(r.email),
+      };
     });
   }),
 

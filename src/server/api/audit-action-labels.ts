@@ -36,6 +36,7 @@ export const ACTION_LABELS: Record<string, string> = {
   'content.update': '更新内容',
   'content.delete': '删除内容',
   'content.createCategory': '创建内容分类',
+  'content.updateCategory': '更新内容分类',
   'content.deleteCategory': '删除内容分类',
 
   // 非 tRPC 入口（route handler / 定时任务）

@@ -43,6 +43,14 @@ yarn-error.log*
 # idea files
 .idea
 
+# Claude Code 的**个人**本地覆盖（工具自动生成，每人不同）。
+# 只忽略 settings.local.json，不忽略整个 .claude/ —— 团队共享的
+# settings.json / skills / agents 仍然应该进版本控制。
+# 同时也修掉 `pnpm lint`：biome 配了 vcs.useIgnoreFile=true，
+# 不在这里忽略的话，这个由工具写出来的文件会被 files.includes 的 "**" 扫到，
+# 格式不合规直接让质量门禁（以及 husky pre-commit）变红。
+.claude/settings.local.json
+
 # playwright
 playwright-report/
 test-results/
@@ -50,6 +58,11 @@ test-results/
 # tar
 *.tar
 *.tar.gz
+
+# package.sh 的中间产物。正常结束会自己清掉，但构建被中断（CI 超时 / Ctrl-C）
+# 时会留在原地 —— 而 package.sh 用 `git status --porcelain` 拦「工作区不干净」，
+# 该检查含未跟踪文件，于是下一次构建会被自己上一次的残留卡死。
+deploy_package/
 
 # docker build artifacts
 seed.mjs

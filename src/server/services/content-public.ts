@@ -9,7 +9,7 @@ import {
 import type { Viewer } from '@/lib/content-visibility';
 import { getSession } from '@/server/better-auth/server';
 import { db } from '@/server/db';
-import { content } from '@/server/db/schema';
+import { content, contentCategory } from '@/server/db/schema';
 import { getUserRole } from '@/server/services/admin-check';
 import { getFrontendConfig } from '@/server/services/config';
 import { visibleContentWhere } from '@/server/services/content-query';
@@ -49,6 +49,45 @@ function clampPageSize(value: unknown): number {
 }
 
 /**
+ * 分类 slug → id。不存在返回 null（调用方据此退化为「不按分类过滤」）。
+ *
+ * 裹 React.cache：列表页会先渲染分类导航、再查列表，同一个请求里会问两次。
+ */
+const resolveCategoryId = cache(
+  async (slug: string): Promise<number | null> => {
+    const [row] = await db
+      .select({ id: contentCategory.id })
+      .from(contentCategory)
+      .where(eq(contentCategory.slug, slug))
+      .limit(1);
+    return row?.id ?? null;
+  },
+);
+
+/**
+ * 某个内容类型下、当前访问者**确实能看到内容**的分类清单，供门户列表页做导航。
+ *
+ * 为什么要 join content 而不是直接把 contentCategory 全表列出来：分类是全站共用的，
+ * 直接列出来会在「公告」页显示一堆只属于「案例」的分类，点进去全是空列表。
+ * 而且 visibleContentWhere 参与其中，定向可见的内容不会因为「分类还在导航里」
+ * 而泄露它的存在。
+ */
+export async function listPublishedCategories(type: string) {
+  const viewer = await getViewer();
+  return db
+    .selectDistinct({
+      id: contentCategory.id,
+      name: contentCategory.name,
+      slug: contentCategory.slug,
+      sortOrder: contentCategory.sortOrder,
+    })
+    .from(contentCategory)
+    .innerJoin(content, eq(content.categoryId, contentCategory.id))
+    .where(and(eq(content.type, type), visibleContentWhere(viewer)))
+    .orderBy(contentCategory.sortOrder, contentCategory.id);
+}
+
+/**
  * 门户列表：置顶优先，其次发布时间倒序，id 兜底保证翻页顺序稳定。
  *
  * 第二档必须用 COALESCE(published_at, created_at) 而不能直接 `desc(publishedAt)`：
@@ -64,6 +103,8 @@ export async function listPublishedContent(params: {
   type: string;
   page?: number;
   pageSize?: number;
+  /** 分类 slug；未传或传了不存在的 slug 都表示不按分类过滤 */
+  categorySlug?: string;
 }) {
   // 页码在这里收敛，而不是只在调用页收敛：offset 直接由它算出，一个 Infinity /
   // 1e21 / 小数传进来，postgres.js 会把它按 String(x) 发给 PG 去转 bigint 并直接
@@ -72,7 +113,19 @@ export async function listPublishedContent(params: {
   const page = clampPage(params.page);
   const pageSize = clampPageSize(params.pageSize);
   const viewer = await getViewer();
-  const where = and(eq(content.type, params.type), visibleContentWhere(viewer));
+
+  // 分类过滤解析成 id 再过滤，而不是 join 分类表按 slug 比对：slug 不存在时
+  // （链接过期、分类被删）应当回落成「不过滤」而不是返回空列表 —— 后者看起来
+  // 和「这个分类下真的没内容」完全一样，用户不会意识到是链接失效了。
+  const categoryId = params.categorySlug
+    ? await resolveCategoryId(params.categorySlug)
+    : null;
+
+  const where = and(
+    eq(content.type, params.type),
+    visibleContentWhere(viewer),
+    ...(categoryId === null ? [] : [eq(content.categoryId, categoryId)]),
+  );
 
   const [rows, totalResult] = await Promise.all([
     db

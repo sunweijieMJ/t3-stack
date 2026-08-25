@@ -102,6 +102,38 @@ export const content = createTable(
     uniqueIndex('content_type_slug_idx').on(t.type, t.slug),
     // 门户列表的固定查询形态：按 type 过滤 + 按状态过滤 + 置顶优先 + 时间倒序。
     index('content_type_status_idx').on(t.type, t.status),
+    /**
+     * 门户列表页的专用索引，覆盖「过滤 + 排序」一整条形态：
+     *   WHERE type = ? AND status = 'published' ORDER BY pinned DESC,
+     *         coalesce(published_at, created_at) DESC, id DESC
+     * （见 services/content-public 的 listPublishedContent）
+     *
+     * 上面那条 (type, status) 只能吃掉过滤，排序仍要对整个 type 分区做一次
+     * 全量 sort —— 内容攒起来之后这是门户首屏最重的一步。把三个排序键按**完全
+     * 相同的顺序与方向**接在后面，PG 才能直接顺着索引取前 N 行。
+     *
+     * 三个细节，改动时都不能动：
+     *   - 顺序必须与 ORDER BY 逐字对应，少一个或换位置索引就用不上了；
+     *   - **`.nullsFirst()` 不能省**。drizzle 的 `.desc()` 生成的是
+     *     `DESC NULLS LAST`，而查询侧写的是裸 `desc`，PG 对 DESC 的默认是
+     *     NULLS FIRST —— 两者的 pathkey 对不上，planner 会退回去做全量 Sort。
+     *     实测（PGlite，5 万行）：NULLS LAST 版本 cost 4244 且仍有 Sort 节点，
+     *     NULLS FIRST 版本 cost 1.17 的纯 Index Scan。索引照样会被建出来、
+     *     照样出现在 EXPLAIN 里（当过滤用），所以这个错误不会有任何报错，
+     *     只是这条索引对排序完全无效。pinned / id 都是 NOT NULL，
+     *     NULLS 方向不影响结果，只影响能不能匹配上。
+     *   - 第二个键必须是 coalesce 表达式本身，不能拆成 published_at ——
+     *     那是查询侧为了处理「未填发布时间」而刻意用的表达式（见
+     *     content-public 里的说明），索引里换成裸列就对不上了。
+     *     这一支走裸 SQL，写的就是 `desc`，本身已经是 NULLS FIRST。
+     */
+    index('content_portal_list_idx').on(
+      t.type,
+      t.status,
+      t.pinned.desc().nullsFirst(),
+      sql`coalesce(${t.publishedAt}, ${t.createdAt}) desc`,
+      t.id.desc().nullsFirst(),
+    ),
     index('content_published_at_idx').on(t.publishedAt),
     index('content_category_idx').on(t.categoryId),
   ],

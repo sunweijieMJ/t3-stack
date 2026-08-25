@@ -213,9 +213,15 @@ SMTP 两项之所以不在构建期拦：它们是纯运行时依赖，编译产
 
 ### 部署到自建服务器
 
-项目提供 `Dockerfile` 和 `docker-compose.yml`；`.github/workflows/build-deploy.yml`
-会把镜像推到 GHCR 并通过 SSH 调用服务器上的 `manage.sh` 完成滚动更新。
-该工作流只在**推送 `v*` tag** 或**手动触发**时运行，未配置服务器 secrets 时会自动跳过部署。
+项目提供 `Dockerfile` 和 `docker-compose.yml`，有两条自动化路径，都最终调用服务器上的
+`manage.sh`（健康检查与失败自动回滚的逻辑只有那一份）：
+
+| 路径 | 入口 | 适用 |
+| --- | --- | --- |
+| GitHub Actions | `.github/workflows/build-deploy.yml` | 公网 / GHCR，推 `v*` tag 或手动触发 |
+| Jenkins | `Jenkinsfile` | 公司内网，见下一节 |
+
+未配置服务器 secrets 时 GitHub Actions 会自动跳过部署（不是失败）。
 
 ```bash
 # 构建镜像（两个 target：应用 + Nginx）
@@ -228,6 +234,67 @@ APP_IMAGE=organova-app:local NGINX_IMAGE=organova-nginx:local docker compose up 
 
 Nginx 镜像必须由本仓库的 `--target nginx` 构建：它内含 `nginx.conf`、`_next/static`
 与 public 静态资源，用官方 `nginx:alpine` 顶替会得到一个没有任何配置的空容器。
+
+### 通过 Jenkins 部署
+
+`Jenkinsfile`（声明式流水线）。首次接入按顺序做三件事：
+
+**1. 改 `Jenkinsfile` 顶部 `environment` 块里那 6 个值**
+
+```groovy
+REGISTRY        = 'harbor.example.com'   // 私有镜像仓库
+IMAGE_NS        = 'organova'             // 仓库里的项目/命名空间
+REGISTRY_CRED   = 'harbor-credentials'   // 凭据 ID（Username with password）
+DEPLOY_SSH_CRED = 'deploy-ssh-key'       // 凭据 ID（SSH Username with private key）
+DEPLOY_HOST     = 'deploy@10.0.0.10'     // 目标服务器
+DEPLOY_PATH     = '/opt/organova-app'    // 服务器上的部署目录
+```
+
+**2. 服务器侧先手工初始化一次**（流水线不做这一步，也不应该做）
+
+```bash
+mkdir -p /opt/organova-app && cd /opt/organova-app
+# 把仓库里的 manage.sh / docker-compose.yml / nginx.conf / .env.example 传上来
+./manage.sh init          # 生成 .env
+vi .env                   # 填 DATABASE_URL / BETTER_AUTH_SECRET / BETTER_AUTH_URL
+```
+
+流水线**永远不会同步 `.env`** —— 覆盖它等于当场丢掉线上密钥。`Preflight` 阶段会先
+SSH 上去确认 `.env` 存在、并且装了 `curl`（`manage.sh` 的健康检查依赖它，缺失会把
+一个其实正常的新版本误判成失败并自动回滚）。
+
+**3. 新建 Pipeline 任务，指向本仓库的 `Jenkinsfile`**
+
+构建参数：
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `DELIVERY` | `REGISTRY` | `REGISTRY`=推仓库后服务器 pull；`OFFLINE`=打 tar.gz 后 scp + `docker load` |
+| `DEPLOY` | `true` | 取消勾选则只构建产物，不动线上 |
+| `RUN_QUALITY` | `true` | lint / type-check / spell-check / 单测。重新部署同一 commit 时可关 |
+| `PLATFORM` | `linux/amd64` | **目标服务器**的架构，与 Jenkins agent 无关 |
+
+几个容易踩的点：
+
+- **镜像 tag 用 `git rev-parse --short=7`，不能用 `--short`**。后者是 `core.abbrev=auto`，
+  长度随仓库对象数增长，仓库变大后会变成 8 位，服务器就会去 pull 一个不存在的 tag ——
+  构建成功、部署失败。
+- **app 与 nginx 两个镜像必须同 commit 同 tag**。nginx 镜像里烤进了 `_next/static`，
+  错配的现场表现是「页面能打开但样式全丢」（HTML 来自新版应用、静态资源 404），
+  排查方向极容易被带偏。
+- **agent 需要能跑 `docker build`**（挂 `docker.sock` 或 dind）。质量门禁跑在
+  `node:22-alpine` 容器里，所以 agent 本身不需要装 Node/pnpm；如果 agent 本来就有，
+  把 `Quality` 阶段换成直接 `sh 'pnpm ...'` 会更快。
+- **工作区必须干净**。流水线开头 `cleanWs()` 是必需的：`package.sh` 用
+  `git status --porcelain` 拦「工作区不干净」，而该命令含未跟踪文件 —— 上一次构建
+  被中断留下的 `deploy_package/` 会让这次构建以「你有未提交的改动」失败。
+- 部署失败时 `manage.sh` 已自动回滚到上一版本，线上服务应仍可用；容器状态与最近
+  100 行应用日志就在 SSH 输出里。确认现状用 `./manage.sh status` 与 `./manage.sh health`。
+
+**字体必须自托管，不能改回 `next/font/google`**：那是构建期去 `fonts.googleapis.com`
+抓字体，且生产构建下抓不到就直接失败（Next 只在 dev 模式回落到兜底字体）。内网 Jenkins
+连不上 Google，`pnpm build` 会红，而报错和「部署」这件事看起来毫无关系。字体文件在
+`src/fonts/`，见 `src/app/layout.tsx` 顶部的说明。
 
 生产环境默认监听 `HOST_PORT`（默认 `80`，见 `.env.example` 与 `docker-compose.yml`），
 通过 Nginx 反向代理到应用容器。

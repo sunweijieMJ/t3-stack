@@ -1,6 +1,18 @@
 import { z } from 'zod';
 import { isSafeInternalPath } from '@/lib/safe-path';
 
+/**
+ * 会改写对象原型的键。source 来自 systemConfig 的 jsonb，而 `JSON.parse` 出来的
+ * `{"__proto__": {...}}` 是一个**自有可枚举属性**，for...in 会枚举到它，随后
+ * `result[key] = ...` 走的是 Object.prototype 上的 setter —— 改掉的是 result
+ * 自己的原型链，而不是新增一个普通字段。
+ *
+ * 影响范围有限（只污染这一个对象，不是全局 Object.prototype），且写入侧
+ * buildFrontendConfigZod 是 .strict()，带这种键的配置根本存不进去 —— 只有绕开
+ * 接口直接改库才可能出现。但拦一行的成本是零，不值得留着这条路。
+ */
+const PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 // 原生深合并，替代 lodash-es/merge
 function deepMerge<T extends Record<string, any>>(
   target: T,
@@ -8,6 +20,7 @@ function deepMerge<T extends Record<string, any>>(
 ): T {
   const result = { ...target };
   for (const key in source) {
+    if (PROTO_KEYS.has(key)) continue;
     const sv = source[key];
     if (
       sv !== null &&

@@ -15,6 +15,41 @@
   color: #8c8c8c;
 }
 
+.categoryBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -16px 0 32px;
+}
+
+.categoryLink,
+.categoryActive {
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 14px;
+  line-height: 1.6;
+  text-decoration: none;
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+.categoryLink {
+  border: 1px solid rgb(0 0 0 / 12%);
+  color: #595959;
+
+  &:hover {
+    border-color: var(--portal-primary);
+    color: var(--portal-primary);
+  }
+}
+
+.categoryActive {
+  border: 1px solid var(--portal-primary);
+  background: var(--portal-primary);
+  color: #fff;
+}
+
 .list {
   margin: 0;
   padding: 0;
