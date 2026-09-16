@@ -147,17 +147,17 @@ pnpm dev
 
 ### 部署到 Vercel
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FsunweijieMJ%2Ft3-stack&env=DATABASE_URL,BETTER_AUTH_SECRET,ADMIN_EMAILS,SMTP_USER,SMTP_PASS&envDescription=%E5%BF%85%E5%A1%AB%E9%A1%B9%EF%BC%9A%E6%95%B0%E6%8D%AE%E5%BA%93%E3%80%81%E8%AE%A4%E8%AF%81%E5%AF%86%E9%92%A5%E3%80%81%E7%AE%A1%E7%90%86%E5%91%98%E9%82%AE%E7%AE%B1%E4%B8%8E%20SMTP&envLink=https%3A%2F%2Fgithub.com%2FsunweijieMJ%2Ft3-stack%2Fblob%2Fmaster%2F.env.example&project-name=organova-website&repository-name=organova-website)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FsunweijieMJ%2Ft3-stack&env=DATABASE_URL,BETTER_AUTH_SECRET,ADMIN_EMAILS,SEED_ADMIN_EMAIL,SEED_ADMIN_PASSWORD,SMTP_USER,SMTP_PASS&envDescription=%E5%BF%85%E5%A1%AB%E9%A1%B9%EF%BC%9A%E6%95%B0%E6%8D%AE%E5%BA%93%E3%80%81%E8%AE%A4%E8%AF%81%E5%AF%86%E9%92%A5%E3%80%81%E7%AE%A1%E7%90%86%E5%91%98%E9%82%AE%E7%AE%B1%E4%B8%8E%E5%88%9D%E5%A7%8B%E8%B4%A6%E5%8F%B7%E3%80%81SMTP&envLink=https%3A%2F%2Fgithub.com%2FsunweijieMJ%2Ft3-stack%2Fblob%2Fmaster%2F.env.example&project-name=organova-website&repository-name=organova-website)
 
-点击后需要填 5 个变量：
+点击后需要填 7 个变量（顺序与表单一致）：
 
 | 变量 | 说明 | 缺失时 |
 |------|------|--------|
 | `DATABASE_URL` | PostgreSQL 连接串。Vercel 上可用 Neon / Supabase 等托管库 | 构建期直接失败 |
 | `BETTER_AUTH_SECRET` | `openssl rand -base64 32` 生成，**至少 32 字符** | 构建期直接失败 |
 | `ADMIN_EMAILS` | 管理员邮箱白名单，不填则没有人能进后台 | 站点能起，但没人能进后台 |
+| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | **创建第一个账号**。邮箱填与上一项相同的值 | 见下方说明 |
 | `SMTP_USER` / `SMTP_PASS` | 默认登录方式是邮箱验证码，没有 SMTP 就登不进去。<br>若改用 `AUTH_METHOD=email-password` 则可留空 | 构建能过，**启动时报错** |
-| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | **创建第一个账号**，邮箱须同时在 `ADMIN_EMAILS` 里 | 见下方说明 |
 
 ### 为什么必须填 `SEED_ADMIN_*`
 
