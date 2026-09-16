@@ -23,9 +23,13 @@ export const frontendConfigSchema = {
       defaultPage: {
         type: 'string',
         title: '默认页面',
+        // 默认值是门户首页而不是 /admin：内容的「可见角色」支持定向给普通用户，
+        // 这类账号是被设计来登录看内容的，把他们的第一屏做成「当前账号无权访问后台」
+        // 是误导。管理员从 /admin 链接进来时 callbackUrl 会带着真实路径，
+        // 不受这个默认值影响。
         description:
-          '登录后默认跳转的页面路径（须以 / 开头）。若登录链接自带 callbackUrl，则以 callbackUrl 优先',
-        defaultValue: '/admin',
+          '登录后默认跳转的页面路径（须以 / 开头）。若登录链接自带 callbackUrl，则以 callbackUrl 优先。填后台路径时，没有对应权限的账号会被自动改送到他进得去的页面',
+        defaultValue: '/',
       },
       defaultLanguage: {
         type: 'string',

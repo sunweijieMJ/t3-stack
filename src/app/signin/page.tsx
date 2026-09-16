@@ -1,9 +1,11 @@
 import { redirect } from 'next/navigation';
 import { DEFAULT_PRIMARY_COLOR } from '@/constants/frontend-config';
 import { env } from '@/env';
+import { resolveLandingPath } from '@/lib/admin-menu';
 import { parseAuthMethod } from '@/lib/auth-methods';
 import { safeInternalPath } from '@/lib/safe-path';
 import { getSession } from '@/server/better-auth/server';
+import { getUserRole } from '@/server/services/admin-check';
 import { getFrontendConfig, getSiteName } from '@/server/services/config';
 import SignInForm from './signin-form';
 
@@ -46,8 +48,13 @@ export default async function SignInPage({
   // （相当于一个走登录页中转的站内跳转），且同样受 safeInternalPath 白名单约束。
   //
   // 要换账号的用户先退出登录即可 —— 后台右上角有「退出登录」。
+  // 落点再按角色收敛一次：defaultPage 可以被配成后台路径，而后台对不同角色
+  // 开放的页面并不相同。不收敛的话「已登录访问 /signin」会变成「被弹到
+  // /no-access」，见 lib/admin-menu 的 resolveLandingPath。
   const session = await getSession();
-  if (session?.user) redirect(redirectTo);
+  if (session?.user) {
+    redirect(resolveLandingPath(redirectTo, getUserRole(session.user)));
+  }
 
   return (
     <SignInForm

@@ -604,7 +604,11 @@ const SUBTITLE: Record<AuthMethod, string> = {
 export interface SignInFormProps {
   authMethod: AuthMethod;
   siteName: string;
-  /** 登录后落点。已由服务端过 safeInternalPath 白名单：callbackUrl → 后台默认页 → / */
+  /**
+   * 登录后的**期望**落点。已由服务端过 safeInternalPath 白名单：
+   * callbackUrl → 后台默认页 → /。
+   * 登录成功后还要经 /signin/landing 按角色收敛一次，这里拿到的不是最终地址。
+   */
   redirectTo: string;
   /** basic.primaryColor，作为 --accent 注入；整页高亮（描边/光晕/极光）全部由它派生 */
   primaryColor: string;
@@ -620,9 +624,13 @@ export default function SignInForm({
   const reduced = useReducedMotion();
   const [done, setDone] = useState(false);
 
+  // 不直接 push(redirectTo)：落点可能指向后台，而「这个账号进不进得去」要合并
+  // ADMIN_EMAILS 白名单才算得出来，客户端拿不到白名单。绕一趟 /signin/landing
+  // 由服务端按角色收敛，见那个文件的说明。replace 而非 push：中转页不该留在
+  // 浏览历史里，否则用户点「后退」会再被分发一次。
   const handleSuccess = useCallback(() => {
     setDone(true);
-    router.push(redirectTo);
+    router.replace(`/signin/landing?to=${encodeURIComponent(redirectTo)}`);
     router.refresh();
   }, [router, redirectTo]);
 

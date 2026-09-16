@@ -3,9 +3,10 @@ import {
   ADMIN_MENU,
   defaultAdminPath,
   permissionForAdminPath,
+  resolveLandingPath,
   visibleAdminMenu,
 } from '@/lib/admin-menu';
-import { hasPermission } from '@/lib/rbac';
+import { hasPermission, ROLES } from '@/lib/rbac';
 
 describe('visibleAdminMenu', () => {
   it('admin 能看到全部菜单', () => {
@@ -92,5 +93,89 @@ describe('permissionForAdminPath', () => {
     expect(permission === null || hasPermission(role, permission)).toBe(
       allowed,
     );
+  });
+});
+
+describe('resolveLandingPath', () => {
+  it('门户路径不受角色影响', () => {
+    for (const role of ROLES) {
+      expect(resolveLandingPath('/', role)).toBe('/');
+      expect(resolveLandingPath('/content/news', role)).toBe('/content/news');
+    }
+  });
+
+  it('有权限的后台路径原样返回', () => {
+    expect(resolveLandingPath('/admin', 'admin')).toBe('/admin');
+    expect(resolveLandingPath('/admin/users', 'admin')).toBe('/admin/users');
+    expect(resolveLandingPath('/admin/content', 'editor')).toBe(
+      '/admin/content',
+    );
+  });
+
+  // 这条是本函数的存在理由：普通用户登录后的第一屏不能是「无权访问后台」。
+  it('没有后台准入的角色被送回门户首页', () => {
+    expect(resolveLandingPath('/admin', 'user')).toBe('/');
+    expect(resolveLandingPath('/admin/content', 'user')).toBe('/');
+  });
+
+  it('能进后台但进不去该页面时，落到自己的后台首页', () => {
+    expect(resolveLandingPath('/admin/users', 'editor')).toBe('/admin/content');
+    expect(resolveLandingPath('/admin/setting', 'editor')).toBe(
+      '/admin/content',
+    );
+  });
+
+  // 带查询串的后台路径必须照样被识别出来。safeInternalPath 会放行
+  // `/admin?tab=1`，而 proxy.ts 是按 pathname 匹配的 —— 这里若只比整串，
+  // 它会被当成门户路径原样放行，然后在路由守卫那里被弹到 /no-access。
+  it('查询串与锚点不影响后台路径识别', () => {
+    expect(resolveLandingPath('/admin?tab=1', 'user')).toBe('/');
+    expect(resolveLandingPath('/admin/content#top', 'user')).toBe('/');
+    expect(resolveLandingPath('/admin/users?page=2', 'editor')).toBe(
+      '/admin/content',
+    );
+  });
+
+  it('有权限时保留查询串', () => {
+    expect(resolveLandingPath('/admin/content?page=2', 'admin')).toBe(
+      '/admin/content?page=2',
+    );
+  });
+
+  // 登录页在有 session 时会跳向落点；落点又是登录页的话两边互相弹，
+  // 浏览器最终报 ERR_TOO_MANY_REDIRECTS。
+  it.each(ROLES)('登录流程自身的页面不能作为落点（role=%s）', (role) => {
+    expect(resolveLandingPath('/signin', role)).toBe('/');
+    expect(resolveLandingPath('/signin/landing', role)).toBe('/');
+    expect(resolveLandingPath('/signin?callbackUrl=/admin', role)).toBe('/');
+  });
+
+  // 只收紧不放宽：返回值必须是该角色真正通得过路由守卫的路径，
+  // 判据与 proxy.ts 用的是同一个 permissionForAdminPath。
+  it.each(ROLES)('返回值一定能通过路由守卫（role=%s）', (role) => {
+    const candidates = [
+      '/',
+      '/content/news',
+      '/admin',
+      '/admin/users',
+      '/admin/content',
+      '/admin/audit-logs',
+      '/admin/setting',
+      // 带查询串/锚点的形态一并纳入：它们曾经绕开整条判断
+      '/admin?tab=1',
+      '/admin/users?page=2',
+      '/admin/setting#seo',
+      '/signin',
+      '/signin/landing?to=/admin',
+    ];
+    for (const desired of candidates) {
+      const landing = resolveLandingPath(desired, role);
+      const pathname = landing.split(/[?#]/)[0] ?? '';
+      expect(pathname.startsWith('/signin')).toBe(false);
+      if (pathname !== '/admin' && !pathname.startsWith('/admin/')) continue;
+      expect(hasPermission(role, 'admin.access')).toBe(true);
+      const permission = permissionForAdminPath(pathname);
+      expect(permission === null || hasPermission(role, permission)).toBe(true);
+    }
   });
 });

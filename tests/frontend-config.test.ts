@@ -93,7 +93,11 @@ describe('mergeConfig', () => {
   it('深合并：只覆盖传入的字段，同级其他字段保留默认值', () => {
     const cfg = mergeConfig({ basic: { primaryColor: '#000000' } } as never);
     expect(cfg.basic?.primaryColor).toBe('#000000');
-    expect(cfg.basic?.defaultPage).toBe('/admin');
+    // 同上：断言对齐 schema 里声明的默认值，而不是写死路径。
+    // 这条验的是「同级字段没被覆盖掉」，与那个默认值具体是什么无关。
+    expect(cfg.basic?.defaultPage).toBe(
+      frontendConfigSchema.basic.properties.defaultPage.defaultValue,
+    );
   });
 
   // 数组是整体替换而非按索引合并，否则删元素永远删不掉

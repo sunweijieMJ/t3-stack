@@ -58,3 +58,50 @@ export function permissionForAdminPath(pathname: string): Permission | null {
 export function defaultAdminPath(role: Role): string | null {
   return visibleAdminMenu(role)[0]?.key ?? null;
 }
+
+/**
+ * 把「期望落点」收敛成该角色确实进得去的页面。
+ *
+ * `basic.defaultPage` 由管理员自由填写、可以指向后台，而后台对不同角色开放的
+ * 页面并不相同。直接跳过去的结果是「登录成功 → 立刻被路由守卫打到 /no-access」，
+ * 用户看到的第一屏是「当前账号无权访问后台」——这对一个只是来看定向内容的
+ * user 角色来说完全是误导。
+ *
+ * 规则：
+ *   - 非后台路径 → 原样返回（门户页面不做权限限制）
+ *   - 后台路径且有对应权限 → 原样返回
+ *   - 有后台准入但进不去这个页面（如 editor 被配到了 /admin/users）→ 他自己的后台首页
+ *   - 没有后台准入 → 门户首页
+ *
+ * 只收紧不放宽：它永远不会把人送进一个权限校验通不过的页面。真正的鉴权仍在
+ * proxy.ts 与各 procedure 上，这里只负责「别把人往墙上撞」。
+ *
+ * 入参应当是已经过 safeInternalPath 的站内路径，本函数不再做开放重定向校验。
+ */
+export function resolveLandingPath(desired: string, role: Role): string {
+  // 必须先切掉查询串与锚点再做匹配。desired 的来源是 ?callbackUrl= 与管理员自由
+  // 填写的 defaultPage，safeInternalPath 只保证「不逃逸出本站」，`/admin?tab=1`
+  // 照样通过。拿整串去比对的话，它既不等于 '/admin' 也不以 '/admin/' 开头，
+  // 于是被当成门户路径原样放行，而 proxy.ts 是按 pathname 匹配的 —— 结果正是
+  // 本函数要消除的那一幕：登录成功后被弹到 /no-access。
+  // 返回时用原串，查询参数不能丢。
+  const pathname = desired.split(/[?#]/)[0] ?? '';
+
+  // 登录流程自身的页面不能当落点：signin 页在有 session 时会跳向落点，
+  // 落点又是它自己，两边互相弹成 ERR_TOO_MANY_REDIRECTS。
+  if (isAuthPath(pathname)) return '/';
+
+  if (pathname !== '/admin' && !pathname.startsWith('/admin/')) return desired;
+
+  // /admin 自身在 ADMIN_MENU 里没有条目，它要的是「能进后台」这个总开关
+  const required = permissionForAdminPath(pathname) ?? 'admin.access';
+  if (hasPermission(role, required)) return desired;
+
+  return hasPermission(role, 'admin.access')
+    ? (defaultAdminPath(role) ?? '/')
+    : '/';
+}
+
+function isAuthPath(pathname: string): boolean {
+  return pathname === '/signin' || pathname.startsWith('/signin/');
+}
