@@ -186,13 +186,35 @@ export default function AdminSettingPage() {
   const handleReset = useCallback(() => {
     modal.confirm({
       title: '恢复默认配置',
-      content: '确定要恢复默认配置吗？所有自定义修改将丢失。',
+      content: (
+        <div>
+          <p>品牌、导航、SEO、页脚、社交链接将全部回到默认值。</p>
+          <p style={{ color: '#cf1322' }}>
+            已上传的 Logo、OG 图等文件会被一并删除，不可恢复。
+          </p>
+          {/* 内容类型决定门户路由：清空它等于让所有已发布内容的列表页与详情页
+              一律 404，而后台列表仍然显示「已发布」——这种失败完全没有声音。
+              它是结构性数据，不属于「配置的默认值」，因此排除在恢复范围之外。 */}
+          <p style={{ color: '#8c8c8c', fontSize: 12 }}>
+            「内容类型」清单会被保留 —— 清空它会让门户上所有内容立刻变成 404。
+            需要调整请到下方的内容类型分区单独修改。
+          </p>
+        </div>
+      ),
+      okText: '确认恢复',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
       centered: true,
       onOk: () => {
-        resetMutation.mutate({ value: {}, expectedUpdatedAt });
+        // 用 savedConfig 而不是 draft：恢复默认同时也要丢弃未保存的本地改动，
+        // 保留的应当是服务端当前那份内容类型清单。
+        resetMutation.mutate({
+          value: { content: savedConfig.content },
+          expectedUpdatedAt,
+        });
       },
     });
-  }, [resetMutation, modal, expectedUpdatedAt]);
+  }, [resetMutation, modal, expectedUpdatedAt, savedConfig]);
 
   const visualDisabledTip =
     jsonError && editMode === 'code' ? '请先修正 JSON 格式错误' : '';
