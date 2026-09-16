@@ -255,13 +255,47 @@ DEPLOY_PATH     = '/opt/organova-app'    // 服务器上的部署目录
 ```bash
 mkdir -p /opt/organova-app && cd /opt/organova-app
 # 把仓库里的 manage.sh / docker-compose.yml / nginx.conf / .env.example 传上来
-./manage.sh init          # 生成 .env
-vi .env                   # 填 DATABASE_URL / BETTER_AUTH_SECRET / BETTER_AUTH_URL
+./manage.sh init          # 生成 .env 并打印必填项清单
+vi .env                   # 按清单填写
 ```
+
+`.env` 必填项（`./manage.sh init` 会打印同一份清单）：
+
+| 变量 | 说明 | 漏填的表现 |
+|------|------|-----------|
+| `DATABASE_URL` | PostgreSQL 连接串 | 容器启动即退出 |
+| `BETTER_AUTH_SECRET` | `openssl rand -base64 32`，**至少 32 字符** | 容器启动即退出 |
+| `BETTER_AUTH_URL` | 应用访问地址 | 容器启动即退出 |
+| `ADMIN_EMAILS` | 管理员邮箱白名单 | 站点能起，但没人能进后台 |
+| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | **创建第一个账号**，邮箱须与 `ADMIN_EMAILS` 一致 | 见下方说明 |
+| `SMTP_USER` / `SMTP_PASS` | 邮箱验证码登录所需；改用 `AUTH_METHOD=email-password` 可留空 | 容器启动即退出 |
+
+`ADMIN_EMAILS` 只决定「谁算管理员」，**不会创建账号**，两者都要配。
+
+漏填 `SEED_ADMIN_*` 的后果很隐蔽，**不会有任何报错**：表建好了但 `user` 表是空的
+→ 登录页点「获取验证码」时，better-auth 因 `disableSignUp: true` 对「库里不存在的
+邮箱」**静默返回 200 且不发信**（防用户枚举，见 `email-otp/routes.mjs` 的
+`shouldSendOTP` 分支）→ 现场表现是「接口 200、邮箱永远收不到验证码」，而且进不去
+后台也就无法用后台去建第一个用户。账号由容器启动时的 `scripts/seed-admin.ts` 创建
+（见 `Dockerfile` 的 CMD），脚本幂等，重复部署无副作用，也不会重置密码。
 
 流水线**永远不会同步 `.env`** —— 覆盖它等于当场丢掉线上密钥。`Preflight` 阶段会先
 SSH 上去确认 `.env` 存在、并且装了 `curl`（`manage.sh` 的健康检查依赖它，缺失会把
 一个其实正常的新版本误判成失败并自动回滚）。
+
+初始化时还要加一条 crontab —— **自建部署没有任何东西会自动调用定时清理端点**
+（Vercel 那边由 `vercel.json` 的 crons 代劳）。不加的话，后台「自动清理、保留 90 天」
+这个配置项只会在有管理员打开审计页时被动触发一次，日志表会一直涨：
+
+```bash
+# .env 里先填好 CRON_SECRET（openssl rand -base64 32）
+crontab -e
+# 加入（把 <口令> 换成 CRON_SECRET 的值，<HOST_PORT> 换成 .env 里的端口）
+0 4 * * * curl -fsS -H "Authorization: Bearer <口令>" http://127.0.0.1:<HOST_PORT>/api/cron/audit-purge
+```
+
+`maybePurgeAuditLogs` 内部有 23 小时的频次保护和 `pg_try_advisory_xact_lock` 多实例
+互斥，重复调用是安全的。
 
 **3. 新建 Pipeline 任务，指向本仓库的 `Jenkinsfile`**
 

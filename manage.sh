@@ -71,6 +71,54 @@ check_docker() {
     fi
 }
 
+# ── 上一个健康版本的快照 ────────────────────────────────────
+
+# 回滚要恢复的三个文件存在这里，由**健康检查通过时**写入。
+#
+# 不能在部署开始时现场备份：CI 会在调用本脚本**之前**就把 docker-compose.yml /
+# nginx.conf scp 覆盖成新版本（见 Jenkinsfile 与 build-deploy.yml 的 Deploy 阶段），
+# 此刻再 cp 一份，存下来的已经是新文件。表现是回滚号称成功、实际跑的是
+# 「旧镜像 + 新配置」这种从未验证过的组合；而若这次部署正是被配置改动搞挂的，
+# 回滚等于没做，且日志里看不出任何异常。
+LAST_GOOD_DIR=".last-good"
+LAST_GOOD_FILES="build_info.sh docker-compose.yml nginx.conf"
+
+# 把当前这套配置记为「已验证可用」。只在健康检查通过后调用。
+save_last_good() {
+    mkdir -p "$LAST_GOOD_DIR"
+    local f
+    for f in $LAST_GOOD_FILES; do
+        [ -f "$f" ] && cp "$f" "$LAST_GOOD_DIR/$f"
+    done
+    return 0
+}
+
+has_last_good() {
+    [ -f "$LAST_GOOD_DIR/build_info.sh" ]
+}
+
+# 恢复上一个健康版本，并重新加载其中的镜像版本号供 docker compose 插值使用
+restore_last_good() {
+    local f
+    for f in $LAST_GOOD_FILES; do
+        [ -f "$LAST_GOOD_DIR/$f" ] && cp "$LAST_GOOD_DIR/$f" "$f"
+    done
+    set -a; source build_info.sh; set +a
+    return 0
+}
+
+# 快照目录尚不存在时（脚本升级前部署过的机器），用当前配置补建一份，
+# 让这一次部署仍然能回滚到正确的镜像版本。
+# 同目录的 docker-compose.yml / nginx.conf 此刻可能已被 CI 覆盖成新版，
+# 只能按现状存下；从下一次部署起快照才完全准确。
+adopt_legacy_snapshot() {
+    if ! has_last_good && [ -f "build_info.sh" ]; then
+        save_last_good
+        log_warn "未找到 ${LAST_GOOD_DIR}/ 快照，已按当前状态补建（本次回滚只保证镜像版本准确）"
+    fi
+    return 0
+}
+
 # ── 首次部署初始化 ──────────────────────────────────────────
 
 init_deployment() {
@@ -85,9 +133,17 @@ init_deployment() {
         log_blue "  vi ${SCRIPT_DIR}/.env"
         log_blue ""
         log_blue "  必填项："
-        log_blue "    DATABASE_URL        — PostgreSQL 连接串"
-        log_blue "    BETTER_AUTH_SECRET   — openssl rand -base64 32"
+        log_blue "    DATABASE_URL         — PostgreSQL 连接串"
+        log_blue "    BETTER_AUTH_SECRET   — openssl rand -base64 32（至少 32 字符）"
         log_blue "    BETTER_AUTH_URL      — 应用访问地址"
+        log_blue "    ADMIN_EMAILS         — 管理员邮箱白名单（决定谁算管理员，不会建账号）"
+        log_blue "    SEED_ADMIN_EMAIL     — 初始管理员账号，需与 ADMIN_EMAILS 一致"
+        log_blue "    SEED_ADMIN_PASSWORD  — 初始管理员密码，仅首次建号时需要"
+        log_blue "    SMTP_USER / SMTP_PASS — 邮箱验证码登录所需（AUTH_METHOD=email-otp 时必填）"
+        log_blue ""
+        log_warn "  站点没有公开注册入口。漏填 SEED_ADMIN_* 的表现是「容器健康、"
+        log_warn "  验证码接口 200、邮箱收不到验证码」，且没有任何报错。"
+        log_warn "  漏填 SMTP_* 则容器启动时直接退出（env 校验 fail-fast）。"
     else
         log_warn "未找到 .env.example 模板，请手动创建 .env 文件"
     fi
@@ -192,16 +248,13 @@ update_deploy() {
     docker load -i "$nginx_tar"
     log_info "Nginx 镜像加载完成"
 
-    # 备份当前 build_info.sh（用于回滚）
-    local is_first_deploy=false
-    if [ -f "build_info.sh" ]; then
-        cp build_info.sh build_info.sh.bak
-        log_info "已备份当前 build_info.sh → build_info.sh.bak"
-    else
-        is_first_deploy=true
+    # 回滚依据是「上一次健康检查通过时」留下的快照，不是此刻现场备份，
+    # 原因见 LAST_GOOD_DIR 处的说明。
+    adopt_legacy_snapshot
+    local can_rollback=false
+    if has_last_good; then
+        can_rollback=true
     fi
-    [ -f "docker-compose.yml" ] && cp docker-compose.yml docker-compose.yml.bak
-    [ -f "nginx.conf" ] && cp nginx.conf nginx.conf.bak
 
     # 从包中更新文件（不覆盖 .env）
     cp "$pkg_dir/build_info.sh" build_info.sh
@@ -258,6 +311,8 @@ update_deploy() {
     log_info "等待服务就绪（最长约 65s）..."
     sleep 10
     if [ "$up_ok" = true ] && health_check 12; then
+        save_last_good
+        # 清掉旧版本脚本留下的现场备份，避免与快照目录并存造成误解
         rm -f build_info.sh.bak docker-compose.yml.bak nginx.conf.bak
         log_info "=========================================="
         log_info "更新成功！当前版本: ${COMMIT_HASH:-${APP_IMAGE##*:}}"
@@ -267,20 +322,15 @@ update_deploy() {
     else
         log_error "健康检查失败！"
         dump_failure_logs
-        if [ "$is_first_deploy" = true ]; then
-            rm -f docker-compose.yml.bak nginx.conf.bak
-            log_error "首次部署失败，请检查 .env 配置和容器日志："
+        if [ "$can_rollback" = false ]; then
+            log_error "没有可回滚的历史版本，请检查 .env 配置和容器日志："
             log_blue "  $0 logs"
             exit 1
         fi
-        # 非首次部署：回滚到上一版本
-        log_error "正在回滚到上一版本..."
-        mv build_info.sh.bak build_info.sh
-        [ -f "docker-compose.yml.bak" ] && mv docker-compose.yml.bak docker-compose.yml
-        [ -f "nginx.conf.bak" ] && mv nginx.conf.bak nginx.conf
-        set -a; source build_info.sh; set +a
+        log_error "正在回滚到上一个健康版本..."
+        restore_last_good
         if docker compose up -d --force-recreate; then
-            log_error "已回滚到上一版本，请检查新版本问题"
+            log_error "已回滚到上一个健康版本，请检查新版本问题"
         else
             log_error "回滚也失败！请手动检查容器状态"
         fi
@@ -331,14 +381,18 @@ pull_deploy() {
     log_info "  Nginx 镜像: ${nginx_image}"
     log_info "=========================================="
 
-    # 备份当前 build_info.sh（用于回滚）
-    local is_first_deploy=false
-    if [ -f "build_info.sh" ]; then
-        cp build_info.sh build_info.sh.bak
-        log_info "已备份当前 build_info.sh → build_info.sh.bak"
-    else
-        is_first_deploy=true
+    # 回滚依据是「上一次健康检查通过时」留下的快照，见 LAST_GOOD_DIR 处的说明。
+    adopt_legacy_snapshot
+    local can_rollback=false
+    if has_last_good; then
+        can_rollback=true
     fi
+
+    # 对比 .env.example 与 .env，提示缺少的变量。
+    # 必须和 update 路径一样做这一步：CI 的默认投递方式是 REGISTRY，走的正是本函数，
+    # 只在 update 里提示等于「最常用的那条路径永远不提示」——新增的必填变量
+    # （如 SEED_ADMIN_EMAIL）会一直没人补上，而漏配的表现是静默的。
+    check_env_diff
 
     # 生成新的 build_info.sh
     cat > build_info.sh << EOF
@@ -357,9 +411,9 @@ EOF
     log_info "拉取镜像..."
     if ! docker compose pull; then
         log_error "镜像拉取失败"
-        if [ "$is_first_deploy" = false ]; then
-            mv build_info.sh.bak build_info.sh
-            log_info "已恢复 build_info.sh"
+        if [ "$can_rollback" = true ]; then
+            restore_last_good
+            log_info "已恢复上一个健康版本的配置（容器未被动过，仍在运行旧版本）"
         fi
         exit 1
     fi
@@ -377,7 +431,9 @@ EOF
     log_info "等待服务就绪（最长约 65s）..."
     sleep 10
     if [ "$up_ok" = true ] && health_check 12; then
-        rm -f build_info.sh.bak
+        save_last_good
+        # 清掉旧版本脚本留下的现场备份，避免与快照目录并存造成误解
+        rm -f build_info.sh.bak docker-compose.yml.bak nginx.conf.bak
         log_info "=========================================="
         log_info "部署成功！当前版本: ${app_image##*:}"
         log_info "=========================================="
@@ -385,17 +441,16 @@ EOF
     else
         log_error "健康检查失败！"
         dump_failure_logs
-        if [ "$is_first_deploy" = true ]; then
-            log_error "首次部署失败，请检查 .env 配置和容器日志："
+        if [ "$can_rollback" = false ]; then
+            log_error "没有可回滚的历史版本，请检查 .env 配置和容器日志："
             log_blue "  $0 logs"
             exit 1
         fi
-        log_error "正在回滚到上一版本..."
-        mv build_info.sh.bak build_info.sh
-        set -a; source build_info.sh; set +a
+        log_error "正在回滚到上一个健康版本..."
+        restore_last_good
         docker compose pull || log_warn "拉取旧版镜像失败，将尝试使用本地缓存"
         if docker compose up -d --force-recreate; then
-            log_error "已回滚到上一版本，请检查新版本问题"
+            log_error "已回滚到上一个健康版本，请检查新版本问题"
         else
             log_error "回滚也失败！请手动检查容器状态"
         fi
@@ -530,6 +585,8 @@ ${GREEN}环境变量:${NC}
 ${GREEN}文件说明:${NC}
   .env              应用配置（数据库、密钥、HOST_PORT 等）—— 手动管理，update 不会覆盖
   build_info.sh     镜像版本 + 构建元信息 —— update 自动管理
+  .last-good/       上一个通过健康检查的 build_info.sh / docker-compose.yml / nginx.conf，
+                    部署失败时据此自动回滚 —— 自动管理，不要手工改动或删除
 
 ${GREEN}示例:${NC}
   $0 init                                            # 首次部署初始化

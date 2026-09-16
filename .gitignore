@@ -68,3 +68,7 @@ deploy_package/
 seed.mjs
 seed-admin.mjs
 migrate.dist.mjs
+
+# manage.sh 在部署目录里维护的「上一个健康版本」快照（仅存在于服务器上，
+# 但在仓库目录里直接跑过 manage.sh 时也会生成）
+.last-good/
